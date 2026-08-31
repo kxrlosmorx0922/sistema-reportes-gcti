@@ -475,50 +475,56 @@ def conmutar_estado(empresa_id):
     db.close()
     return redirect('/admin')
 
+# =================================================================
+# 📥 PASO 2: CARGAR BASE DE COLABORADORES (LEE COLUMNA C PARA EMAIL)
+# =================================================================
 @app.route('/admin/cargar-colaboradores', methods=['POST'])
 def cargar_colaboradores():
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: 
+        return redirect('/login')
+        
     empresa_id_raw = request.form.get('empresa_id')
     archivo = request.files.get('archivo_colaboradores')
     
     if not empresa_id_raw or not archivo:
-        flash("Faltan campos requeridos", "danger")
+        flash("Faltan campos requeridos para cargar la base de colaboradores.", "danger")
         return redirect('/admin')
-    
-    # ✅ CORREGIDO: Inicializamos la conexión a la base de datos
+        
     db = SessionLocal()
-    
     try:
         empresa_id = int(empresa_id_raw)
+        nombre_archivo = archivo.filename.lower()
         
-        # 1. Lectura rápida del Excel en memoria
-        df = pd.read_excel(archivo)
-        df = df.where(pd.notnull(df), None)  # Limpieza masiva de NaN
-        
+        # 1. Lectura del archivo (Excel o CSV)
+        if nombre_archivo.endswith('.csv'):
+            try:
+                df = pd.read_csv(archivo, encoding='utf-8')
+            except Exception:
+                archivo.seek(0)
+                df = pd.read_csv(archivo, encoding='latin1')
+        else:
+            df = pd.read_excel(archivo)
+            
+        df = df.where(pd.notnull(df), None)
         columnas_originales = df.columns.tolist()
         
-        # Identificación de columnas clave
-        col_id_name = next((c for c in columnas_originales if 'identificaci' in c.lower() or c.lower() == 'id'), None)
-        col_nombre_name = next((c for c in columnas_originales if 'nombre' in c.lower()), None)
-        col_email_name = next((c for c in columnas_originales if 'email' in c.lower() or 'correo' in c.lower() or 'e-mail' in c.lower()), None)
+        # Posición estándar fija: Columna A (ID), Columna B (Nombre), Columna C (E-Mail)
+        col_id_name = columnas_originales[0]
+        col_nombre_name = columnas_originales[1] if len(columnas_originales) > 1 else columnas_originales[0]
+        col_email_name = columnas_originales[2] if len(columnas_originales) > 2 else columnas_originales[0]
         
-        if not col_id_name or not col_nombre_name or not col_email_name:
-            flash("El Excel no cumple con el formato requerido (Identificación, Nombre, E-Mail)", "danger")
-            db.close()
-            return redirect('/admin')
-            
+        # Identificación de segmentos demográficos (de la Columna D en adelante)
         columnas_fijas = {col_id_name, col_nombre_name, col_email_name}
         columnas_demograficas = [
             c for c in columnas_originales 
             if c not in columnas_fijas 
+            and 'saludo' not in c.lower()
             and 'tipo de aplicacion' not in c.lower().replace('ó', 'o').replace('á', 'a')
             and 'tipo de comunicado' not in c.lower().replace('ó', 'o').replace('á', 'a')
         ]
 
-        # =================================================================
-        # 🧹 PASO 1: LIMPIEZA MASIVA PREVIA
-        # =================================================================
+        # Limpieza previa de datos anteriores para esta empresa
         colab_ids = [c[0] for c in db.query(Colaborador.id).filter(Colaborador.empresa_id == empresa_id).all()]
-        
         if colab_ids:
             db.query(ValorDemografico).filter(ValorDemografico.colaborador_id.in_(colab_ids)).delete(synchronize_session=False)
             db.query(Participacion).filter(Participacion.colaborador_id.in_(colab_ids)).delete(synchronize_session=False)
@@ -527,25 +533,16 @@ def cargar_colaboradores():
         db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).delete(synchronize_session=False)
         db.commit()
 
-        # =================================================================
-        # 📥 PASO 2: INSERCIÓN MASIVA DE CATEGORÍAS DEMOGRÁFICAS
-        # =================================================================
-        categorias_dicts = [
-            {'nombre': col_demog, 'empresa_id': empresa_id}
-            for col_demog in columnas_demograficas
-        ]
+        # Inserción masiva de Categorías Demográficas
+        categorias_dicts = [{'nombre': col_demog, 'empresa_id': empresa_id} for col_demog in columnas_demograficas]
         db.bulk_insert_mappings(CategoriaDemografica, categorias_dicts)
         db.commit()
         
-        # Recuperamos las categorías en una sola consulta para tener sus IDs
         cats_db = db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).all()
         mapa_categorias = {cat.nombre: cat.id for cat in cats_db}
 
-        # =================================================================
-        # 👥 PASO 3: INSERCIÓN MASIVA DE COLABORADORES (Super Veloz)
-        # =================================================================
+        # Inserción masiva de Colaboradores
         colaboradores_dicts = []
-        
         for index, fila in df.iterrows():
             id_raw = fila[col_id_name]
             nombre = fila[col_nombre_name]
@@ -564,25 +561,19 @@ def cargar_colaboradores():
                 'empresa_id': empresa_id
             })
             
-        # Insertamos miles de colaboradores en microsegundos
         db.bulk_insert_mappings(Colaborador, colaboradores_dicts)
         db.commit()
 
-        # =================================================================
-        # 📊 PASO 4: INSERCIÓN MASIVA DE VALORES DEMOGRÁFICOS
-        # =================================================================
-        # Recuperamos todos los colaboradores creados en una Sola Consulta rápida
+        # Inserción masiva de Valores Demográficos
         colabs_db = db.query(Colaborador.id, Colaborador.identificacion).filter(Colaborador.empresa_id == empresa_id).all()
         mapa_colaboradores = {c.identificacion: c.id for c in colabs_db}
         
         valores_dicts = []
-        
         for index, fila in df.iterrows():
             id_raw = fila[col_id_name]
             if id_raw is None:
                 continue
             identificacion = str(id_raw).strip().split('.')[0]
-            
             colab_id = mapa_colaboradores.get(identificacion)
             if not colab_id:
                 continue
@@ -598,21 +589,23 @@ def cargar_colaboradores():
                             'valor': valor_str[:150]
                         })
                         
-        # Insertamos todos los valores demográficos masivamente en un solo viaje de red
         db.bulk_insert_mappings(ValorDemografico, valores_dicts)
         db.commit()
 
-        flash(f"¡Éxito total! Se cargaron {len(colaboradores_dicts)} colaboradores de forma masiva en tiempo récord.", "success")
+        flash(f"👥 Censo cargado exitosamente. Se registraron {len(colaboradores_dicts)} colaboradores con sus segmentos demográficos.", "success")
         
     except Exception as e:
         db.rollback()
-        flash(f"Error al procesar el archivo Excel en la nube: {str(e)}", "danger")
+        flash(f"Error al procesar la base de colaboradores: {str(e)}", "danger")
     finally:
-        # ✅ CORREGIDO: Cerramos la conexión siempre
         db.close()
         
     return redirect('/admin')
 
+
+# =================================================================
+# 📊 PASO 3: CARGAR PARTICIPACIÓN (LEE COLUMNA A PARA BUSCARX)
+# =================================================================
 @app.route('/admin/cargar-participacion', methods=['POST'])
 def cargar_participacion():
     if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: 
@@ -630,7 +623,7 @@ def cargar_participacion():
         empresa_id_int = int(empresa_id)
         nombre_archivo = archivo.filename.lower()
         
-        # 1. Lectura de CSV o Excel
+        # 1. Lectura transparente de CSV o Excel
         if nombre_archivo.endswith('.csv'):
             try:
                 df = pd.read_csv(archivo, encoding='utf-8')
@@ -640,20 +633,19 @@ def cargar_participacion():
         else:
             df = pd.read_excel(archivo)
             
-        # 2. Tomar Columna A (Email) y Columna C (Response) directamente por posición
+        # Posición fija para el match: Columna A (Email de Alchemer)
         col_email_idx = 0
-        col_response_idx = 2 if len(df.columns) >= 3 else None
         
-        # 3. Cargar colaboradores de esta empresa
+        # 2. Cargar diccionario de búsqueda (BUSCARX) desde la BD del Paso 2 (Columna C)
         colaboradores_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id_int).all()
         mapa_colaboradores = {c.email.strip().lower(): c.id for c in colaboradores_db if c.email}
         
-        # Evitar duplicados
         participaciones_existentes = {p[0] for p in db.query(Participacion.colaborador_id).all()}
         
         nuevas_participaciones = []
         conteo_respuestas = 0
         
+        # 3. Recorrer Columna A y hacer el "BUSCARX" contra el mapa
         for _, fila in df.iterrows():
             email_raw = fila.iloc[col_email_idx]
             if pd.isna(email_raw) or not email_raw:
@@ -661,13 +653,7 @@ def cargar_participacion():
                 
             email_val = str(email_raw).strip().lower()
             
-            # Si hay columna de respuesta (Columna C), descartamos 'Not started'
-            if col_response_idx is not None and pd.notna(fila.iloc[col_response_idx]):
-                estado_resp = str(fila.iloc[col_response_idx]).strip().lower()
-                if 'not start' in estado_resp or 'sin iniciar' in estado_resp:
-                    continue
-            
-            # Match con el colaborador
+            # Si hace Match con la Columna C registrada en el Paso 2
             if email_val in mapa_colaboradores:
                 colab_id = mapa_colaboradores[email_val]
                 if colab_id not in participaciones_existentes:
@@ -675,18 +661,18 @@ def cargar_participacion():
                     participaciones_existentes.add(colab_id)
                     conteo_respuestas += 1
                     
-        # Inserción masiva
+        # Inserción masiva en Neon
         if nuevas_participaciones:
             db.bulk_insert_mappings(Participacion, nuevas_participaciones)
             db.commit()
-            flash(f"✅ Reporte de participación actualizado. Se registraron {conteo_respuestas} respuestas recibidas.", "success")
+            flash(f"✅ Reporte de participación actualizado. Se cruzaron y registraron {conteo_respuestas} respuestas recibidas.", "success")
         else:
-            flash("ℹ️ Procesado correctamente, pero no hay nuevas respuestas para registrar.", "info")
+            flash("ℹ️ Las participaciones de este archivo ya se encontraban registradas previamente.", "info")
             
     except Exception as e:
         db.rollback()
         print(f"❌ Error en carga de participación: {str(e)}")
-        flash(f"⚠️ Error al procesar el archivo: {str(e)}", "danger")
+        flash(f"⚠️ Error al procesar el archivo de participación: {str(e)}", "danger")
     finally:
         db.close()
         
