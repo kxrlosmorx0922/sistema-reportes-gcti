@@ -256,24 +256,31 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 
 function obtenerDemografiasSeleccionadas() {
-    return Array.from(document.querySelectorAll('input[name="demografias_seleccionadas"]:checked')).map(cb => cb.value);
+    return Array.from(document.querySelectorAll('.toggle-demografia:checked')).map(cb => cb.value);
 }
 
 function descargarExcelDirecto() {
-    const empresaId = document.getElementById('empresa_select').value;
     const categoriasIds = obtenerDemografiasSeleccionadas();
     
-    if (!empresaId || categoriasIds.length === 0) {
-        alert('Debe seleccionar la organización y al menos una demografía.');
+    if (!empresaActualId || empresaActualId === "None" || empresaActualId === "") {
+        alert('Debe seleccionar primero una organización.');
+        return;
+    }
+
+    if (categoriasIds.length === 0) {
+        alert('Debe marcar al menos una demografía para exportar.');
         return;
     }
 
     fetch('/admin/descargar-reporte-excel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ empresa_id: parseInt(empresaId), categorias_ids: categoriasIds })
+        body: JSON.stringify({ empresa_id: parseInt(empresaActualId), categorias_ids: categoriasIds })
     })
-    .then(response => response.blob())
+    .then(response => {
+        if (!response.ok) throw new Error("Error en la descarga del Excel");
+        return response.blob();
+    })
     .then(blob => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -285,24 +292,23 @@ function descargarExcelDirecto() {
     })
     .catch(err => alert('Error al generar el archivo Excel: ' + err));
 }
-    
-function ejecutarEnvioReporte() {
-    const btn = document.getElementById('btn-enviar-mail');
-    const seleccionados = Array.from(document.querySelectorAll('.toggle-demografia:checked')).map(cb => cb.value);
 
-    if (!empresaActualId) {
+function enviarReportePorEmail() {
+    const seleccionados = obtenerDemografiasSeleccionadas();
+
+    if (!empresaActualId || empresaActualId === "None" || empresaActualId === "") {
         alert("⚠️ Por favor seleccione primero una organización.");
         return;
     }
 
     if (seleccionados.length === 0) {
-        alert("⚠️ Debe marcar al menos una demografía para generar el reporte.");
+        alert("⚠️ Debe marcar al menos una demografía para enviar el reporte.");
         return;
     }
 
-    btn.disabled = true;
-    btn.innerHTML = "⏳ Generando Excel y Enviando...";
-    btn.style.backgroundColor = "#7f8c8d";
+    if (!confirm("¿Desea enviar el reporte Excel consolidado por correo electrónico al destinatario oficial?")) {
+        return;
+    }
 
     fetch('/admin/enviar-reporte-email', {
         method: 'POST',
@@ -322,12 +328,7 @@ function ejecutarEnvioReporte() {
     })
     .catch(err => {
         console.error(err);
-        alert("❌ Error al procesar la solicitud.");
-    })
-    .finally(() => {
-        btn.disabled = false;
-        btn.innerHTML = "✉️ Generar Excel y Enviar por Correo Directo";
-        btn.style.backgroundColor = "#000000";
+        alert("❌ Error al procesar la solicitud de correo.");
     });
 }
 
@@ -343,19 +344,19 @@ function cargarProgresoMaestroInvariable(empresaId) {
         .then(data => {
             if(data && data.porcentaje !== undefined) {
                 document.getElementById('texto-conteos-dinamicos').innerHTML = `
-                    Encuestas enviadas: <strong>${data.total_enviadas || 4073}</strong><br>
-                    Encuestas respondidas: <strong>${data.total_respondidas || 1538}</strong>
+                    Encuestas enviadas: <strong>${data.total_enviadas}</strong><br>
+                    Encuestas respondidas: <strong>${data.total_respondidas}</strong>
                 `;
                 renderGauge(data.porcentaje);
             }
         })
         .catch(err => {
-            console.error("Error al consultar indicador maestro corporativo:", err);
+            console.error("Error al consultar indicador:", err);
             document.getElementById('texto-conteos-dinamicos').innerHTML = `
-                Encuestas enviadas: <strong>4073</strong><br>
-                Encuestas respondidas: <strong>1538</strong>
+                Encuestas enviadas: <strong>0</strong><br>
+                Encuestas respondidas: <strong>0</strong>
             `;
-            renderGauge(37.8);
+            renderGauge(0);
         });
 }
 
@@ -404,13 +405,9 @@ function renderGauge(porcentaje) {
 
 function cargarMetricasAdmin(categoriaId) {
     const zonaTabla = document.getElementById('zona-tabla');
-    const btnExportar = document.getElementById('btn-exportar');
     const selector = document.getElementById('selector-categoria');
     
-    if (!categoriaId) { 
-        if(btnExportar) btnExportar.style.display="none"; 
-        return; 
-    }
+    if (!categoriaId) { return; }
     
     const nombreFiltroSeleccionado = selector.options[selector.selectedIndex].text;
     zonaTabla.innerHTML = `<div style="padding:4rem; text-align:center; color:#7f8c8d;">⏳ Consultando desglose demográfico...</div>`;
@@ -418,8 +415,6 @@ function cargarMetricasAdmin(categoriaId) {
     fetch(`/api/metricas/${categoriaId}`)
         .then(res => res.json())
         .then(data => {
-            if(btnExportar) btnExportar.style.display = "inline-block";
-            
             let html = `
                 <table class="tabla-reporte">
                     <thead>
@@ -462,23 +457,6 @@ function cargarMetricasAdmin(categoriaId) {
             html += `</tbody></table>`;
             zonaTabla.innerHTML = html;
         });
-}
-
-function exportarCSV() {
-    const selector = document.getElementById('selector-categoria');
-    const nom = selector.options[selector.selectedIndex].text;
-    let csv = `Reporte Supervisor - Filtro: ${nom}\n\n`;
-    csv += `"${nom}",Poblacion objetivo,Encuestas recibidas,(%) avance\n`;
-    
-    document.querySelectorAll(".tabla-reporte tbody tr").forEach(tr => {
-        const cols = tr.querySelectorAll("td");
-        csv += `"${cols[0].innerText}",${cols[1].innerText},"${cols[2].innerText}","${cols[3].innerText.trim()}"\n`;
-    });
-    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `Admin_Reporte_${nom.replace(/\s+/g,'_')}.csv`);
-    link.click();
 }
 </script>
 </body>
