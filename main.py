@@ -33,7 +33,6 @@ app.secret_key = 'clave_secreta_super_segura_para_sesiones'
 # 📅 MOTOR 1: INTEGRACIÓN CON GOOGLE CALENDAR API (CREAR Y BORRAR)
 # =================================================================
 def crear_evento_google_calendar(nombre_empresa, fecha_inicio_str, fecha_cierre_str, correo_coordinador):
-    """Crea un evento recurrente, invita al coordinador y retorna el ID único del evento."""
     SCOPES = ['https://www.googleapis.com/auth/calendar']
     creds = None
     
@@ -83,7 +82,6 @@ def crear_evento_google_calendar(nombre_empresa, fecha_inicio_str, fecha_cierre_
         return None
 
 def eliminar_evento_google_calendar(event_id):
-    """Se ha eliminado la tarea recurrente del Google Calendar del Coordinador."""
     SCOPES = ['https://www.googleapis.com/auth/calendar']
     if not event_id or event_id == '-': return False
     
@@ -187,14 +185,17 @@ def enviar_correo_notificacion(destinatario, nombre_titular, usuario_login, pass
 # CONFIGURACIÓN E INICIALIZACIÓN DE LA BASE DE DATOS
 # =================================================================
 try:
-    DATABASE_URL = "postgresql://neondb_owner:npg_DvFw5XoZ9Yuh@ep-fancy-feather-aws87y8x-pooler.c-12.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    DATABASE_URL = os.environ.get(
+        "DATABASE_URL",
+        "postgresql://neondb_owner:npg_DvFw5XoZ9Yuh@ep-fancy-feather-aws87y8x-pooler.c-12.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    )
     
     engine = create_engine(
         DATABASE_URL,
         pool_size=5,
         max_overflow=10,
-        pool_recycle=30,       # Recicla las conexiones cada 30 segundos
-        pool_pre_ping=True     # Hace un "ping" rápido a Neon para verificar si el canal sigue vivo antes de operar
+        pool_recycle=30,
+        pool_pre_ping=True
     )
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     
@@ -473,7 +474,7 @@ def conmutar_estado(empresa_id):
     return redirect('/admin')
 
 # =================================================================
-# 📥 PASO 2: CARGAR BASE DE COLABORADORES (CORREGIDO Y GARANTIZADO)
+# 📥 PASO 2: CARGAR BASE DE COLABORADORES (DETECCIÓN DINÁMICA FIABLE)
 # =================================================================
 @app.route('/admin/cargar-colaboradores', methods=['POST'])
 def cargar_colaboradores():
@@ -492,7 +493,6 @@ def cargar_colaboradores():
         empresa_id = int(empresa_id_raw)
         nombre_archivo = archivo.filename.lower()
         
-        # 1. Lectura del archivo (Excel o CSV)
         if nombre_archivo.endswith('.csv'):
             try:
                 df = pd.read_csv(archivo, encoding='utf-8')
@@ -505,11 +505,12 @@ def cargar_colaboradores():
         df = df.where(pd.notnull(df), None)
         columnas_originales = df.columns.tolist()
         
-        col_id_name = columnas_originales[0]
-        col_nombre_name = columnas_originales[1] if len(columnas_originales) > 1 else columnas_originales[0]
-        col_email_name = columnas_originales[2] if len(columnas_originales) > 2 else columnas_originales[0]
+        # Identificar dinámicamente las 3 columnas fijas sin importar la posición
+        col_id_name = next((c for c in columnas_originales if 'identificaci' in c.lower() or c.lower() == 'id'), columnas_originales[0])
+        col_nombre_name = next((c for c in columnas_originales if 'nombre' in c.lower()), columnas_originales[1] if len(columnas_originales) > 1 else columnas_originales[0])
+        col_email_name = next((c for c in columnas_originales if 'email' in c.lower() or 'correo' in c.lower() or 'e-mail' in c.lower()), columnas_originales[2] if len(columnas_originales) > 2 else columnas_originales[0])
         
-        # Segmentos demográficos (Columna D en adelante)
+        # Excluir de demografías las columnas fijas y encabezados no analíticos como "Saludo"
         columnas_fijas = {col_id_name, col_nombre_name, col_email_name}
         columnas_demograficas = [
             c for c in columnas_originales 
@@ -519,7 +520,7 @@ def cargar_colaboradores():
             and 'tipo de comunicado' not in c.lower().replace('ó', 'o').replace('á', 'a')
         ]
 
-        # Limpieza de datos antiguos para esta empresa
+        # Limpieza previa de censo anterior para esta empresa
         colab_ids = [c[0] for c in db.query(Colaborador.id).filter(Colaborador.empresa_id == empresa_id).all()]
         if colab_ids:
             db.query(ValorDemografico).filter(ValorDemografico.colaborador_id.in_(colab_ids)).delete(synchronize_session=False)
@@ -529,7 +530,7 @@ def cargar_colaboradores():
         db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).delete(synchronize_session=False)
         db.commit()
 
-        # Insertar Categorías Demográficas
+        # Inserción masiva de Categorías Demográficas
         categorias_dicts = [{'nombre': col_demog, 'empresa_id': empresa_id} for col_demog in columnas_demograficas]
         db.bulk_insert_mappings(CategoriaDemografica, categorias_dicts)
         db.commit()
@@ -537,7 +538,7 @@ def cargar_colaboradores():
         cats_db = db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).all()
         mapa_categorias = {cat.nombre: cat.id for cat in cats_db}
 
-        # Insertar Colaboradores
+        # Inserción masiva de Colaboradores
         colaboradores_dicts = []
         for index, fila in df.iterrows():
             id_raw = fila[col_id_name]
@@ -560,7 +561,7 @@ def cargar_colaboradores():
         db.bulk_insert_mappings(Colaborador, colaboradores_dicts)
         db.commit()
 
-        # ✅ CRUCIAL: Mapear colaboradores recién creados POR EMAIL (para evitar fallos por ID)
+        # Mapeo por Email directo para alimentar valores_demograficos
         colabs_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id).all()
         mapa_colaboradores_by_email = {c.email.strip().lower(): c.id for c in colabs_db if c.email}
         
@@ -601,7 +602,7 @@ def cargar_colaboradores():
     return redirect('/admin')
 
 # =================================================================
-# 📊 PASO 3: CARGAR PARTICIPACIÓN (LEE COLUMNA A PARA BUSCARX)
+# 📊 PASO 3: CARGAR PARTICIPACIÓN (LEE COLUMNA A)
 # =================================================================
 @app.route('/admin/cargar-participacion', methods=['POST'])
 def cargar_participacion():
@@ -706,6 +707,10 @@ def restablecer_password():
     return redirect('/login')
 
 def calcular_margen_error(esperadas, recibidas):
+    """
+    Fórmula exacta de GCTI:
+    =IF(C2>B2, "-", IF(C2="", "", 0.0196*50*(B2-C2)/(SQRT(C2)*(B2-1))*100))
+    """
     try:
         b2 = float(esperadas)
         c2 = float(recibidas)
