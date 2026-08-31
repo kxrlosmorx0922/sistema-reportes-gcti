@@ -820,36 +820,71 @@ def progreso_global():
 
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)
+    wb.remove(wb.active)  # Eliminar hoja inicial por defecto
 
     db = SessionLocal()
 
+    # Mapeo oficial de colores según la jerarquía de niveles
+    COLORES_NIVELES = {
+        1: 'C00000',  # Rojo
+        2: '0000FF',  # Azul
+        3: '70AD47',  # Verde
+        4: 'C65911',  # Naranja
+        5: '7030A0',  # Púrpura
+        6: 'A6A6A6',  # Gris
+        7: '000000'   # Negro
+    }
+
     fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
     font_encabezado = Font(name='Century Gothic', size=11, bold=True, color='FFFFFF')
-    font_datos = Font(name='Century Gothic', size=10)
     alineacion_centro = Alignment(horizontal='center', vertical='center')
     alineacion_izquierda = Alignment(horizontal='left', vertical='center')
     borde_fino = Side(border_style='thin', color='D9D9D9')
     borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
+    # 1. Agrupar categorías seleccionadas por su nombre raíz
+    # Ej: "Área de Desempeño 1" y "Área de Desempeño 2" -> Raíz: "Área de Desempeño"
+    grupos_categorias = {}
+    
     for cat_id in categorias_ids_seleccionadas:
         try:
             cat_id_int = int(cat_id)
         except (ValueError, TypeError):
             continue
 
-        categoria = db.query(CategoriaDemografica).filter(
+        cat_obj = db.query(CategoriaDemografica).filter(
             CategoriaDemografica.id == cat_id_int,
             CategoriaDemografica.empresa_id == empresa_id
         ).first()
 
-        if not categoria:
+        if not cat_obj:
             continue
 
-        nombre_hoja = str(categoria.nombre).replace('/', '-').replace('\\', '-')[:30]
+        # Extraer el nombre base quitando dígitos finales (ej. "Área de Desempeño 1" -> "Área de Desempeño")
+        nombre_base = re.sub(r'\s+\d+$', '', cat_obj.nombre).strip()
+        
+        # Extraer el número de nivel (si no tiene número se asume nivel 1)
+        match_nivel = re.search(r'(\d+)$', cat_obj.nombre)
+        nivel_num = int(match_nivel.group(1)) if match_nivel else 1
+
+        if nombre_base not in grupos_categorias:
+            grupos_categorias[nombre_base] = []
+
+        grupos_categorias[nombre_base].append({
+            'id': cat_obj.id,
+            'nombre_original': cat_obj.nombre,
+            'nivel': nivel_num
+        })
+
+    # 2. Construir una pestaña por cada grupo de jerarquía
+    for nombre_grupo, lista_subcats in grupos_categorias.items():
+        # Ordenar los subniveles de menor a mayor (Nivel 1, Nivel 2, etc.)
+        lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
+        
+        nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
         ws = wb.create_sheet(title=nombre_hoja)
 
-        headers = [categoria.nombre, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
+        headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
         ws.append(headers)
 
         for col_num in range(1, 6):
@@ -858,47 +893,62 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             cell.font = font_encabezado
             cell.alignment = alineacion_centro if col_num > 1 else alineacion_izquierda
 
-        query_resultados = (
-            db.query(
-                ValorDemografico.valor,
-                func.count(Colaborador.id).label('total'),
-                func.count(Participacion.id).label('contestaron')
+        # Processar cada subnivel en orden jerárquico dentro de la misma hoja
+        for subcat in lista_subcats:
+            nivel_actual = subcat['nivel']
+            color_hex = COLORES_NIVELES.get(nivel_actual, '000000')
+
+            query_resultados = (
+                db.query(
+                    ValorDemografico.valor,
+                    func.count(Colaborador.id).label('total'),
+                    func.count(Participacion.id).label('contestaron')
+                )
+                .join(Colaborador, ValorDemografico.colaborador_id == Colaborador.id)
+                .outerjoin(Participacion, Colaborador.id == Participacion.colaborador_id)
+                .filter(
+                    ValorDemografico.categoria_id == subcat['id'],
+                    Colaborador.empresa_id == empresa_id
+                )
+                .group_by(ValorDemografico.valor)
+                .all()
             )
-            .join(Colaborador, ValorDemografico.colaborador_id == Colaborador.id)
-            .outerjoin(Participacion, Colaborador.id == Participacion.colaborador_id)
-            .filter(
-                ValorDemografico.categoria_id == categoria.id,
-                Colaborador.empresa_id == empresa_id
-            )
-            .group_by(ValorDemografico.valor)
-            .all()
-        )
 
-        for fila in query_resultados:
-            b2 = float(fila.total)
-            c2 = float(fila.contestaron)
+            for fila in query_resultados:
+                b2 = float(fila.total)
+                c2 = float(fila.contestaron)
 
-            if 0 < c2 < 5:
-                row_data = [fila.valor, int(b2), '-', '-', '-']
-            else:
-                pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
-                margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
-                margen_str = f'{margen}%' if margen != '-' else '-'
-                pct_str = f'{pct}%'
-                row_data = [fila.valor, int(b2), int(c2), pct_str, margen_str]
+                if 0 < c2 < 5:
+                    row_data = [fila.valor, int(b2), '-', '-', '-']
+                else:
+                    pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
+                    margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
+                    margen_str = f'{margen}%' if margen != '-' else '-'
+                    pct_str = f'{pct}%'
+                    row_data = [fila.valor, int(b2), int(c2), pct_str, margen_str]
 
-            ws.append(row_data)
+                ws.append(row_data)
+                row_idx = ws.max_row
 
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=5):
-            for idx, cell in enumerate(row):
-                cell.font = font_datos
-                cell.border = borde_celda
-                cell.alignment = alineacion_centro if idx > 0 else alineacion_izquierda
+                # Formatear celdas con sangría y color del nivel correspondiente
+                font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_actual <= 3), color=color_hex)
+                alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_actual - 1))
 
+                for col_idx in range(1, 6):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cell.border = borde_celda
+                    if col_idx == 1:
+                        cell.font = font_nivel
+                        cell.alignment = alineacion_sangria
+                    else:
+                        cell.font = Font(name='Century Gothic', size=10)
+                        cell.alignment = alineacion_centro
+
+        # Autoajuste del ancho de las columnas
         for col in ws.columns:
             max_len = max(len(str(cell.value or '')) for cell in col)
             col_letter = openpyxl.utils.get_column_letter(col[0].column)
-            ws.column_dimensions[col_letter].width = max(max_len + 5, 18)
+            ws.column_dimensions[col_letter].width = max(max_len + 8, 20)
 
     db.close()
 
@@ -906,7 +956,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     wb.save(output)
     output.seek(0)
     return output
-
+    
 @app.route('/admin/descargar-reporte-excel', methods=['POST'])
 def descargar_reporte_excel():
     if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
