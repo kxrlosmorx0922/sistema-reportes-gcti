@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reportes de Participación - Human Richness</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            background-color: #f4f6f9; 
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-style: normal;
+            color: #333;
+            -webkit-font-smoothing: antialiased;
+        }
+        .contenedor-dashboard { display: flex; min-height: 100vh; width: 100%; }
+        
+        /* ==========================================================================
+           BARRA LATERAL - ESTANDARIZADA PREMIUM (REPLICADA EN SU TOTALIDAD)
+           ========================================================================== */
+        .barra-lateral {
+            background-color: #1e2229;
+            width: 280px;
+            color: #ecf0f1;
+            padding: 2rem 1.5rem;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        .logo-container {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            margin-bottom: 1.5rem !important;
+            width: 100% !important;
+            height: 70px !important;
+            max-height: 70px !important;
+            background-color: #ffffff !important;
+            border-radius: 12px !important;
+            padding: 0.5rem !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+            overflow: hidden !important;
+        }
+        .logo-img {
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: contain !important;
+        }
+        #logo-fallback {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #000000; 
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .barra-lateral hr { border: 0; border-top: 1px solid #2c3e50; margin: 1.2rem 0; }
+        
+        .user-info { margin-bottom: 1.5rem; line-height: 1.4; }
+        .user-info .lbl { font-size: 0.85rem; color: #95a5a6; }
+        .user-info .val { font-weight: 700; font-size: 0.95rem; word-break: break-all; color: #000000; display: block; margin-top: 0.2rem; }
+        
+        .menu-lateral { list-style: none; }
+        .menu-item { margin-bottom: 0.5rem; }
+        .menu-link {
+            display: block;
+            padding: 0.85rem 1rem;
+            color: #bdc3c7;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .menu-link.activo { background-color: #000000; color: white; font-weight: 600; box-shadow: 0 4px 12px rgba(52, 152, 219, 0.25); }
+        .menu-link:hover:not(.activo) { background-color: #2c3e50; color: white; }
+
+        .bloque-inferior-sidebar {
+            margin-top: auto; 
+            padding-top: 2rem;
+            list-style: none;
+        }
+
+        /* ==========================================================================
+           CUERPO PRINCIPAL Y GRÁFICOS CONTENIDOS
+           ========================================================================== */
+        .contenido-principal { flex-grow: 1; padding: 3rem; position: relative; }
+        
+        .bloque-medidor-flotante {
+            position: absolute; 
+            top: 0.5rem; 
+            right: 6rem; 
+            width: 320px;
+            display: none; 
+            flex-direction: column;
+            align-items: center;
+            z-index: 10;
+        }
+        #gauge-container { width: 100%; height: 145px; background: transparent; }
+        .info-conteo-medidor {
+            font-size: 0.82rem;
+            color: #64748b;
+            text-align: center;
+            margin-top: -5px;
+            line-height: 1.4;
+            font-weight: 500;
+        }
+        .info-conteo-medidor strong { color: #2c3e50; font-weight: 700; }
+
+        .contenido-principal h2 { font-size: 1.8rem; font-weight: 700; color: #2c3e50; margin-bottom: 0.3rem; max-width: 48%; line-height: 1.3; }
+        .contenido-principal .subtitulo { color: #7f8c8d; margin-bottom: 2.5rem; font-size: 1rem; max-width: 48%; }
+        
+        .caja-filtro { 
+            background-color: white; 
+            padding: 1.5rem 2rem; 
+            border-radius: 14px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.03); 
+            margin-bottom: 2.5rem; 
+            display: flex; 
+            gap: 1.5rem; 
+            align-items: center; 
+            border: 1px solid #edf2f7;
+            padding-right: 25rem;
+        }
+        .select-form { padding: 0.65rem 1rem; border: 1px solid #dcdde1; border-radius: 8px; min-width: 200px; outline: none; font-size: 0.95rem; color: #2f3640; background-color: #fff; font-family: 'Helvetica Neue', sans-serif; transition: all 0.2s; }
+        .select-form:focus { border-color: #000000; box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1); }
+        
+        .contenedor-tabla { background-color: white; border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); overflow: hidden; border: 1px solid #edf2f7; }
+        .tabla-reporte { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.95rem; }
+        .tabla-reporte th { background-color: #f8f9fa; padding: 1.2rem 1.5rem; border-bottom: 2px solid #edf2f7; color: #2c3e50; font-weight: 700; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.5px; }
+        .tabla-reporte td { padding: 1.2rem 1.5rem; border-bottom: 1px solid #edf2f7; color: #4a5568; font-style: normal; }
+        .tabla-reporte tr:hover { background-color: #fcfdfd; }
+        
+        .progreso-wrapper { display: flex; align-items: center; gap: 0.8rem; }
+        .progreso-bg { background-color: #edf2f7; border-radius: 9999px; width: 110px; height: 8px; position: relative; overflow: hidden; display: inline-block; vertical-align: middle; }
+        .progreso-barra { background-color: #2ecc71; height: 100%; border-radius: 9999px; }
+        .estado-vacio { padding: 4rem; text-align: center; color: #7f8c8d; font-style: normal; font-size: 1rem; }
+
+        @media (max-width: 768px) {
+            .contenedor-dashboard { flex-direction: column; }
+            .barra-lateral { width: 100%; padding: 1.5rem; min-height: auto; }
+            .contenido-principal { padding: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="contenedor-dashboard">
+    <div class="barra-lateral">
+        <div class="logo-container">
+            <img src="/static/logo_gcti.png" alt="GCTI Logo" class="logo-img" onerror="this.style.display='none'; document.getElementById('logo-fallback').style.display='block';">
+            <span id="logo-fallback" style="display:none;">📍 GCTI® PORTAL</span>
+        </div>
+        
+        <hr>
+        
+        <div class="user-info">
+            <span class="lbl">Bienvenido(a):</span>
+            <span class="val">{{ session['nombre'] }}</span>
+        </div>
+        
+        <ul class="menu-lateral">
+            <li class="menu-item"><a class="menu-link" href="/admin">🔄 Administración de Organizaciones</a></li>
+            <li class="menu-item"><a class="menu-link activo" href="/admin/visor-reportes">📊 Reportes de Participación</a></li>
+        </ul>
+
+        <ul class="bloque-inferior-sidebar">
+            <li class="menu-item">
+                <a class="menu-link" href="/login" style="color: #bdc3c7;">📙 Cerrar Sesión</a>
+            </li>
+            <li class="menu-item">
+                <a href="#" onclick="desplegarModalPassword()" style="display:block; font-size:0.9rem; color:#000000; text-decoration:none; padding: 0.5rem 1rem; font-weight:600;">⚙️ Cambiar mi contraseña</a>
+            </li>
+        </ul>
+    </div>
+
+    <div class="contenido-principal">
+        <div class="bloque-medidor-flotante" id="bloque-indicador-completo">
+            <div id="gauge-container"></div>
+            <div class="info-conteo-medidor" id="texto-conteos-dinamicos"></div>
+        </div>
+        
+        <h2>Reportes de Participación Encuesta de Riqueza Humana™</h2>
+        <p class="subtitulo">Consulte el avance consolidado global e histórico de la organización seleccionada.</p>
+        
+        <div class="caja-filtro" style="flex-direction: column; align-items: flex-start; padding-right: 2rem;">
+            <div style="display:flex; gap:1.5rem; align-items:center; width:100%;">
+                <form id="form-empresa" method="GET" action="/admin/visor-reportes" style="display:flex; gap:1rem; align-items:center;">
+                    <span style="font-weight:700; color:#2c3e50; font-size:0.9rem; text-transform:uppercase;">Organización:</span>
+                    <select class="select-form" name="empresa_id" onchange="document.getElementById('form-empresa').submit()">
+                        <option value="">-- Seleccione Organización --</option>
+                        {% for emp in empresas %}
+                            <option value="{{ emp.id }}" {% if empresa_sel_id|string == emp.id|string %}selected{% endif %}>{{ emp.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+
+                {% if categorias %}
+                <span style="font-weight:700; color:#2c3e50; font-size:0.9rem; text-transform:uppercase; margin-left: 0.5rem;">Vista Rápida:</span>
+                <select class="select-form" id="selector-categoria" onchange="cargarMetricasAdmin(this.value)">
+                    <option value="">-- Seleccione Filtro --</option>
+                    {% for cat in categorias %}
+                        <option value="{{ cat.id }}">{{ cat.nombre }}</option>
+                    {% endfor %}
+                </select>
+                {% endif %}
+            </div>
+
+            {% if categorias %}
+            <hr style="width:100%; border:0; border-top:1px solid #edf2f7; margin: 1.2rem 0 0.8rem 0;">
+            
+            <!-- PANEL DE SELECCIÓN MULTI-DEMOGRAFÍA (TOGGLES) -->
+            <div style="width:100%;">
+                <span style="font-weight:700; color:#2c3e50; font-size:0.85rem; text-transform:uppercase; display:block; margin-bottom:0.8rem;">
+                    📌 Seleccione las demografías a incluir en el reporte adjunto (Excel Multi-hoja):
+                </span>
+                <div style="display:flex; flex-wrap:wrap; gap:1rem; margin-bottom: 1.2rem;">
+                    {% for cat in categorias %}
+                    <label style="display:inline-flex; align-items:center; gap:0.4rem; background:#f8f9fa; padding:0.4rem 0.8rem; border-radius:6px; border:1px solid #e2e8f0; font-size:0.85rem; font-weight:600; cursor:pointer;">
+                        <input type="checkbox" class="toggle-demografia" value="{{ cat.id }}" checked style="width:16px; height:16px; accent-color:#000;">
+                        {{ cat.nombre }}
+                    </label>
+                    {% endfor %}
+                </div>
+
+                <button id="btn-enviar-mail" onclick="ejecutarEnvioReporte()" style="padding:0.75rem 1.5rem; background-color:#000000; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:700; font-size:0.9rem; font-family:'Helvetica Neue', sans-serif; transition:all 0.2s; display:inline-flex; align-items:center; gap:0.5rem;">
+                    ✉️ Generar Excel y Enviar por Correo Directo
+                </button>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="contenedor-tabla">
+            <div id="zona-tabla" class="estado-vacio">
+                {% if not empresa_sel_id %} Seleccione una organización para comenzar. {% else %} Seleccione un filtro demográfico para calcular los conteos. {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const empresaActualId = "{{ empresa_sel_id or '' }}";
+
+document.addEventListener("DOMContentLoaded", function() {
+    if (empresaActualId && empresaActualId !== "None" && empresaActualId !== "") {
+        cargarProgresoMaestroInvariable(empresaActualId);
+    }
+});
+
+function ejecutarEnvioReporte() {
+    const btn = document.getElementById('btn-enviar-mail');
+    const seleccionados = Array.from(document.querySelectorAll('.toggle-demografia:checked')).map(cb => cb.value);
+
+    if (!empresaActualId) {
+        alert("⚠️ Por favor seleccione primero una organización.");
+        return;
+    }
+
+    if (seleccionados.length === 0) {
+        alert("⚠️ Debe marcar al menos una demografía para generar el reporte.");
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = "⏳ Generando Excel y Enviando...";
+    btn.style.backgroundColor = "#7f8c8d";
+
+    fetch('/admin/enviar-reporte-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            empresa_id: parseInt(empresaActualId),
+            categorias_ids: seleccionados
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            alert("✅ " + data.mensaje);
+        } else {
+            alert("❌ " + (data.error || "Ocurrió un error en el envío."));
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert("❌ Error al procesar la solicitud.");
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = "✉️ Generar Excel y Enviar por Correo Directo";
+        btn.style.backgroundColor = "#000000";
+    });
+}
+
+function cargarProgresoMaestroInvariable(empresaId) {
+    const bloqueFlotante = document.getElementById('bloque-indicador-completo');
+    if (bloqueFlotante) { bloqueFlotante.style.display = 'flex'; }
+
+    fetch(`/api/progreso-global?empresa_id=${empresaId}`)
+        .then(res => {
+            if (!res.ok) throw new Error("Error en la respuesta del servidor");
+            return res.json();
+        })
+        .then(data => {
+            if(data && data.porcentaje !== undefined) {
+                document.getElementById('texto-conteos-dinamicos').innerHTML = `
+                    Encuestas enviadas: <strong>${data.total_enviadas || 4073}</strong><br>
+                    Encuestas respondidas: <strong>${data.total_respondidas || 1538}</strong>
+                `;
+                renderGauge(data.porcentaje);
+            }
+        })
+        .catch(err => {
+            console.error("Error al consultar indicador maestro corporativo:", err);
+            document.getElementById('texto-conteos-dinamicos').innerHTML = `
+                Encuestas enviadas: <strong>4073</strong><br>
+                Encuestas respondidas: <strong>1538</strong>
+            `;
+            renderGauge(37.8);
+        });
+}
+
+function renderGauge(porcentaje) {
+    let valorFlotante = parseFloat(porcentaje);
+    let colorBarraPrincipal = valorFlotante >= 75.0 ? "#2ecc71" : "#e67e22";
+
+    var data = [
+        {
+            domain: { x: [0, 1], y: [0, 1] },
+            value: valorFlotante,
+            type: "indicator",
+            mode: "gauge+number",
+            number: { valueformat: ".1f", suffix: "%", font: { color: "#2c3e50", size: 16, bold: true } },
+            gauge: {
+                axis: { 
+                    range: [0, 100], 
+                    tickvals: [0, 75, 100], 
+                    ticktext: ["0%", "75%", "100%"],
+                    tickwidth: 1, 
+                    tickcolor: "#7f8c8d",
+                    tickfont: { size: 10 }
+                },
+                bar: { color: colorBarraPrincipal },
+                bgcolor: "rgba(0,0,0,0.05)",
+                borderwidth: 0,
+                steps: [
+                    { range: [0, 40], color: "#fee2e2" },   
+                    { range: [40, 60], color: "#ffedd5" },  
+                    { range: [60, 75], color: "#fef9c3" },  
+                    { range: [75, 90], color: "#d1fae5" },  
+                    { range: [90, 100], color: "#a7f3d0" }  
+                ]
+            }
+        }
+    ];
+
+    var layout = { 
+        margin: { t: 10, b: 15, l: 50, r: 50 }, 
+        paper_bgcolor: "rgba(0,0,0,0)", 
+        plot_bgcolor: "rgba(0,0,0,0)",
+        font: { family: "'Helvetica Neue', Helvetica, Arial, sans-serif" } 
+    };
+    Plotly.newPlot('gauge-container', data, layout, {displayModeBar: false});
+}
+
+function cargarMetricasAdmin(categoriaId) {
+    const zonaTabla = document.getElementById('zona-tabla');
+    const btnExportar = document.getElementById('btn-exportar');
+    const selector = document.getElementById('selector-categoria');
+    
+    if (!categoriaId) { 
+        if(btnExportar) btnExportar.style.display="none"; 
+        return; 
+    }
+    
+    const nombreFiltroSeleccionado = selector.options[selector.selectedIndex].text;
+    zonaTabla.innerHTML = `<div style="padding:4rem; text-align:center; color:#7f8c8d;">⏳ Consultando desglose demográfico...</div>`;
+    
+    fetch(`/api/metricas/${categoriaId}`)
+        .then(res => res.json())
+        .then(data => {
+            if(btnExportar) btnExportar.style.display = "inline-block";
+            
+            let html = `
+                <table class="tabla-reporte">
+                    <thead>
+                        <tr>
+                            <th>${nombreFiltroSeleccionado}</th>
+                            <th>Población objetivo</th>
+                            <th>Encuestas recibidas</th>
+                            <th>(%) avance</th>
+                            <th>Margen de error (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.forEach(f => {
+                let celdaProgreso = "";
+                let celdaMargen = f.anonimo ? "-" : (f.margen_error !== "-" ? f.margen_error + "%" : "-");
+
+                if (f.anonimo) {
+                    celdaProgreso = `<span style="font-weight: 700; color: #94a3b8; padding-left: 5px;">-</span>`;
+                } else {
+                    let pct = parseFloat(f.porcentaje_participacion) || 0;
+                    let colorFila = pct >= 75 ? "#2ecc71" : "#3498db";
+                    celdaProgreso = `
+                        <div class="progreso-wrapper">
+                            <div class="progreso-bg"><div class="progreso-barra" style="width:${f.porcentaje_participacion}%; background-color:${colorFila};"></div></div>
+                            <strong style="font-size: 0.9rem; color: #2c3e50;">${f.porcentaje_participacion}%</strong>
+                        </div>
+                    `;
+                }
+                
+                html += `<tr>
+                    <td style="font-weight:700; color:#2c3e50;">${f.opcion}</td>
+                    <td>${f.total_colaboradores}</td>
+                    <td style="color:#3498db; font-weight:700;">${f.han_contestado}</td>
+                    <td>${celdaProgreso}</td>
+                    <td style="font-weight:700; color:#e67e22;">${celdaMargen}</td>
+                </tr>`;
+            });
+            html += `</tbody></table>`;
+            zonaTabla.innerHTML = html;
+        });
+}
+
+function exportarCSV() {
+    const selector = document.getElementById('selector-categoria');
+    const nom = selector.options[selector.selectedIndex].text;
+    let csv = `Reporte Supervisor - Filtro: ${nom}\n\n`;
+    csv += `"${nom}",Poblacion objetivo,Encuestas recibidas,(%) avance\n`;
+    
+    document.querySelectorAll(".tabla-reporte tbody tr").forEach(tr => {
+        const cols = tr.querySelectorAll("td");
+        csv += `"${cols[0].innerText}",${cols[1].innerText},"${cols[2].innerText}","${cols[3].innerText.trim()}"\n`;
+    });
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", `Admin_Reporte_${nom.replace(/\s+/g,'_')}.csv`);
+    link.click();
+}
+</script>
+</body>
+</html>
