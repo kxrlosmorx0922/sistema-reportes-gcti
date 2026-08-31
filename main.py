@@ -371,16 +371,10 @@ def crear_empresa():
     if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: 
         return redirect('/login')
         
-    # Leemos las casillas con los nombres exactos que vienen del formulario HTML
     nombre_emp = (request.form.get('organizacion') or request.form.get('nombre_empresa') or '').strip()
     correo_coor = (request.form.get('correo_cdp') or request.form.get('correo_coordinador') or '').strip().lower()
-    
     fecha_ini = request.form.get('fecha_inicio', '').strip()
     fecha_cie = request.form.get('fecha_cierre', '').strip()
-    
-    # Opcionales (para retrocompatibilidad)
-    nombre_cli = (request.form.get('nombre_cliente') or nombre_emp).strip()
-    correo_cli = (request.form.get('correo_cliente') or correo_coor).strip().lower()
     
     if nombre_emp:
         db = SessionLocal()
@@ -400,26 +394,12 @@ def crear_empresa():
                 
                 tabla_real = Empresa.__table__.name
                 db.execute(
-                    text(f"UPDATE {tabla_real} SET fecha_inicio=:ini, fecha_cierre=:cie, cerrada=0, nombre_cliente=:n_cli, correo_cliente=:c_cli, correo_coordinador=:c_coor, calendar_event_id=:ev_id WHERE id=:id"),
-                    {"ini": fecha_ini, "cie": fecha_cie, "n_cli": nombre_cli, "c_cli": correo_cli, "c_coor": correo_coor, "ev_id": event_id, "id": nueva_empresa.id}
+                    text(f"UPDATE {tabla_real} SET fecha_inicio=:ini, fecha_cierre=:cie, cerrada=0, correo_coordinador=:c_coor, calendar_event_id=:ev_id WHERE id=:id"),
+                    {"ini": fecha_ini, "cie": fecha_cie, "c_coor": correo_coor, "ev_id": event_id, "id": nueva_empresa.id}
                 )
                 
-                # Generar usuario cliente asociado
-                email_cliente = generar_username_cliente(nombre_cli)
-                password_cliente = generar_password_aleatorio()
-                
-                if db.query(Usuario).filter(Usuario.email == email_cliente).first():
-                    email_cliente = f"{email_cliente[:-2]}{nueva_empresa.id:02d}"
-                    
-                nuevo_u = Usuario(email=email_cliente, password_hash=password_cliente, rol='cliente', empresa_id=nueva_empresa.id)
-                db.add(nuevo_u)
-                db.flush()
-                
-                tabla_usuario = Usuario.__table__.name
-                db.execute(text(f"UPDATE {tabla_usuario} SET nombre = :nom WHERE id = :id"), {"nom": nombre_cli, "id": nuevo_u.id})
                 db.commit()
-                
-                flash(f"🏢 ¡Organización '{nombre_emp}' creada con éxito! Usuario asignado: {email_cliente}", "success")
+                flash(f"🏢 ¡Organización '{nombre_emp}' creada con éxito!", "success")
             else:
                 flash("⚠️ Esa Organización ya se encuentra registrada.", "danger")
         except Exception as e:
