@@ -1010,12 +1010,15 @@ def enviar_reporte_email():
     excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
     excel_stream.seek(0)
 
-    destinatario_principal = 'roberto.cruz@greatculturetoinnovate.net'
-    copia_cc = 'german.romero@peoplesvoice.co'
-    remitente = 'carlos.mora@peoplesvoice.co'
+    # 1. Remitente dinámico extraído directamente de la sesión actual (Mayra, Carlos, etc.)
+    remitente = session.get('email', 'carlos.mora@peoplesvoice.co')
+    nombre_remitente = session.get('nombre', 'Portal GCTI®')
+
+    destinatario_principal = 'carlos.mora@peoplesvoice.co'
+    copia_cc = 'carlos.mora@peoplesvoice.co'
 
     msg = MIMEMultipart()
-    msg['From'] = f'Portal de Reportes GCTI® <{remitente}>'
+    msg['From'] = f"{nombre_remitente} <{remitente}>"
     msg['To'] = destinatario_principal
     msg['Cc'] = copia_cc
     msg['Subject'] = f'Envío de reporte de participación — {nombre_empresa}'
@@ -1029,6 +1032,7 @@ def enviar_reporte_email():
             <p>El documento consolida los principales indicadores de participación a la fecha. Quedo atento a sus comentarios o a cualquier información adicional que requieran.</p>
             <br>
             <p>Cordialmente,</p>
+            <p><strong>{nombre_remitente}</strong><br><span style="color: #7f8c8d; font-size: 0.9rem;">{remitente}</span></p>
             <hr style="border: 0; border-top: 1px solid #edf2f7; margin: 25px 0 15px 0;">
             <p style="font-size: 0.8rem; color: #a0aec0; text-align: center;">Great Culture to Innovate® — Peoples Voice © 2026</p>
         </div>
@@ -1048,14 +1052,14 @@ def enviar_reporte_email():
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
-        server.login(remitente, 'hxhjkhqleflgvmoo')
+        # Se auténtica con las credenciales SMTP corporativas de salida
+        server.login("carlos.mora@peoplesvoice.co", 'hxhjkhqleflgvmoo')
         recipients = [destinatario_principal, copia_cc]
         server.sendmail(remitente, recipients, msg.as_string())
         server.quit()
-        return jsonify({'success': True, 'mensaje': f'📧 Reporte de {nombre_empresa} enviado por correo exitosamente.'})
+        return jsonify({'success': True, 'mensaje': f'📧 Reporte de {nombre_empresa} enviado por correo exitosamente como {remitente}.'})
     except Exception as e:
         return jsonify({'error': f'Falló el envío por correo electrónico: {str(e)}'}), 500
-
 print("5. Intentando encender el servidor Flask en el entorno de Render...")
 
 if __name__ == '__main__':
