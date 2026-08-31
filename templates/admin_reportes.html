@@ -226,9 +226,14 @@
                     {% endfor %}
                 </div>
 
-                <button id="btn-enviar-mail" onclick="ejecutarEnvioReporte()" style="padding:0.75rem 1.5rem; background-color:#000000; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:700; font-size:0.9rem; font-family:'Helvetica Neue', sans-serif; transition:all 0.2s; display:inline-flex; align-items:center; gap:0.5rem;">
-                    ✉️ Generar Excel y Enviar por Correo Directo
-                </button>
+                <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                    <button type="button" onclick="descargarExcelDirecto()" class="btn" style="background-color: #2ecc71; color: white; font-weight: bold; padding: 0.75rem 1.5rem; width: auto; border: none; border-radius: 6px; cursor: pointer;">
+                        📊 Descargar Excel Multi-Hoja
+                    </button>
+                    <button type="button" onclick="enviarReportePorEmail()" class="btn" style="background-color: #000000; color: white; font-weight: bold; padding: 0.75rem 1.5rem; width: auto; border: none; border-radius: 6px; cursor: pointer;">
+                        📧 Enviar por Correo Directo
+                    </button>
+                </div>
             </div>
             {% endif %}
         </div>
@@ -250,6 +255,37 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 });
 
+function obtenerDemografiasSeleccionadas() {
+    return Array.from(document.querySelectorAll('input[name="demografias_seleccionadas"]:checked')).map(cb => cb.value);
+}
+
+function descargarExcelDirecto() {
+    const empresaId = document.getElementById('empresa_select').value;
+    const categoriasIds = obtenerDemografiasSeleccionadas();
+    
+    if (!empresaId || categoriasIds.length === 0) {
+        alert('Debe seleccionar la organización y al menos una demografía.');
+        return;
+    }
+
+    fetch('/admin/descargar-reporte-excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresa_id: parseInt(empresaId), categorias_ids: categoriasIds })
+    })
+    .then(response => response.blob())
+    .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Reporte_GCTI_Demografias.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    })
+    .catch(err => alert('Error al generar el archivo Excel: ' + err));
+}
+    
 function ejecutarEnvioReporte() {
     const btn = document.getElementById('btn-enviar-mail');
     const seleccionados = Array.from(document.querySelectorAll('.toggle-demografia:checked')).map(cb => cb.value);
