@@ -272,41 +272,59 @@ def login():
 
 @app.route('/admin')
 def panel_admin():
-    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: return redirect('/login')
-    db = SessionLocal()
-    
-    tabla_real = Empresa.__table__.name
-    resultado_raw = db.execute(text(f"SELECT id, nombre, fecha_inicio, fecha_cierre, cerrada, nombre_cliente, correo_cliente, correo_coordinador, calendar_event_id FROM {tabla_real}")).fetchall()
-    organizaciones_maestras = []
-    
-    for fila in resultado_raw:
-        usr = db.query(Usuario).filter(Usuario.empresa_id == fila[0], Usuario.rol == 'cliente').first()
-        organizaciones_maestras.append({
-            "id": fila[0],
-            "nombre": fila[1],
-            "fecha_inicio": fila[2] if fila[2] and fila[2] != "" else '-',
-            "fecha_cierre": fila[3] if fila[3] and fila[3] != "" else '-',
-            "cerrada": 1 if fila[4] == 1 else 0,
-            "nombre_cliente": fila[5] if len(fila) > 5 and fila[5] else '-',
-            "correo_cliente": fila[6] if len(fila) > 6 and fila[6] else '-',
-            "correo_coordinador": fila[7] if len(fila) > 7 and fila[7] else '-',
-            "calendar_event_id": fila[8] if len(fila) > 8 and fila[8] else '-',
-            "email": usr.email if usr else "Sin canal",
-            "password": usr.password_hash if usr else "Sin clave"
-        })
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: 
+        return redirect('/login')
         
+    db = SessionLocal()
+    organizaciones_maestras = []
     coordinadores_maestros = []
-    if session['rol'] == 'admin':
-        lista_c = db.query(Usuario).filter(Usuario.rol == 'coordinador').all()
-        for c in lista_c:
-            coordinadores_maestros.append({
-                "id": c.id,
-                "nombre": getattr(c, 'nombre', c.email) or c.email,
-                "email": c.email,
-                "password": c.password_hash
+    
+    try:
+        tabla_real = Empresa.__table__.name
+        # Consulta segura con fallback
+        resultado_raw = db.execute(text(f"SELECT id, nombre, fecha_inicio, fecha_cierre, cerrada, nombre_cliente, correo_cliente, correo_coordinador, calendar_event_id FROM {tabla_real}")).fetchall()
+        
+        for fila in resultado_raw:
+            usr = db.query(Usuario).filter(Usuario.empresa_id == fila[0], Usuario.rol == 'cliente').first()
+            
+            # Obtención segura de índices
+            f_ini = fila[2] if len(fila) > 2 and fila[2] else '-'
+            f_cie = fila[3] if len(fila) > 3 and fila[3] else '-'
+            cer = 1 if len(fila) > 4 and fila[4] == 1 else 0
+            n_cli = fila[5] if len(fila) > 5 and fila[5] else '-'
+            c_cli = fila[6] if len(fila) > 6 and fila[6] else '-'
+            c_coor = fila[7] if len(fila) > 7 and fila[7] else '-'
+            ev_id = fila[8] if len(fila) > 8 and fila[8] else '-'
+            
+            organizaciones_maestras.append({
+                "id": fila[0],
+                "nombre": fila[1],
+                "fecha_inicio": f_ini,
+                "fecha_cierre": f_cie,
+                "cerrada": cer,
+                "nombre_cliente": n_cli,
+                "correo_cliente": c_cli,
+                "correo_coordinador": c_coor,
+                "calendar_event_id": ev_id,
+                "email": usr.email if usr else "Sin canal",
+                "password": usr.password_hash if usr else "Sin clave"
             })
             
-    db.close()
+        if session.get('rol') == 'admin':
+            lista_c = db.query(Usuario).filter(Usuario.rol == 'coordinador').all()
+            for c in lista_c:
+                coordinadores_maestros.append({
+                    "id": c.id,
+                    "nombre": getattr(c, 'nombre', c.email) or c.email,
+                    "email": c.email,
+                    "password": c.password_hash
+                })
+    except Exception as e:
+        print(f"❌ Error al cargar panel admin: {e}")
+        flash(f"Error al cargar datos del panel: {str(e)}", "danger")
+    finally:
+        db.close()
+        
     return render_template('admin.html', empresas=organizaciones_maestras, organizaciones=organizaciones_maestras, coordinadores=coordinadores_maestros)
 
 @app.route('/admin/crear-coordinador', methods=['POST'])
