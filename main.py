@@ -820,11 +820,10 @@ def progreso_global():
 
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # Eliminar hoja inicial por defecto
+    wb.remove(wb.active)
 
     db = SessionLocal()
 
-    # Mapeo oficial de colores según la jerarquía de niveles
     COLORES_NIVELES = {
         1: 'C00000',  # Rojo
         2: '0000FF',  # Azul
@@ -842,10 +841,8 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     borde_fino = Side(border_style='thin', color='D9D9D9')
     borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-    # 1. Agrupar categorías seleccionadas por su nombre raíz
-    # Ej: "Área de Desempeño 1" y "Área de Desempeño 2" -> Raíz: "Área de Desempeño"
+    # 1. Clasificar categorías seleccionadas por su nombre raíz
     grupos_categorias = {}
-    
     for cat_id in categorias_ids_seleccionadas:
         try:
             cat_id_int = int(cat_id)
@@ -860,10 +857,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         if not cat_obj:
             continue
 
-        # Extraer el nombre base quitando dígitos finales (ej. "Área de Desempeño 1" -> "Área de Desempeño")
         nombre_base = re.sub(r'\s+\d+$', '', cat_obj.nombre).strip()
-        
-        # Extraer el número de nivel (si no tiene número se asume nivel 1)
         match_nivel = re.search(r'(\d+)$', cat_obj.nombre)
         nivel_num = int(match_nivel.group(1)) if match_nivel else 1
 
@@ -876,9 +870,13 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             'nivel': nivel_num
         })
 
-    # 2. Construir una pestaña por cada grupo de jerarquía
+    # 2. Cargar colaboraciones y participaciones para realizar el cruce multinivel
+    colabs_db = db.query(Colaborador.id).filter(Colaborador.empresa_id == empresa_id).all()
+    colab_ids_list = [c[0] for c in colabs_db]
+
+    participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
+
     for nombre_grupo, lista_subcats in grupos_categorias.items():
-        # Ordenar los subniveles de menor a mayor (Nivel 1, Nivel 2, etc.)
         lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
         
         nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
@@ -893,46 +891,61 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             cell.font = font_encabezado
             cell.alignment = alineacion_centro if col_num > 1 else alineacion_izquierda
 
-        # Processar cada subnivel en orden jerárquico dentro de la misma hoja
-        for subcat in lista_subcats:
-            nivel_actual = subcat['nivel']
-            color_hex = COLORES_NIVELES.get(nivel_actual, '000000')
+        # Mapeo de valores por colaborador: {colaborador_id: {cat_id: valor}}
+        valores_por_colab = {}
+        cats_ids_grupo = [s['id'] for s in lista_subcats]
+        
+        if colab_ids_list:
+            registros_valores = db.query(ValorDemografico).filter(
+                ValorDemografico.colaborador_id.in_(colab_ids_list),
+                ValorDemografico.categoria_id.in_(cats_ids_grupo)
+            ).all()
 
-            query_resultados = (
-                db.query(
-                    ValorDemografico.valor,
-                    func.count(Colaborador.id).label('total'),
-                    func.count(Participacion.id).label('contestaron')
-                )
-                .join(Colaborador, ValorDemografico.colaborador_id == Colaborador.id)
-                .outerjoin(Participacion, Colaborador.id == Participacion.colaborador_id)
-                .filter(
-                    ValorDemografico.categoria_id == subcat['id'],
-                    Colaborador.empresa_id == empresa_id
-                )
-                .group_by(ValorDemografico.valor)
-                .all()
-            )
+            for rv in registros_valores:
+                if rv.colaborador_id not in valores_por_colab:
+                    valores_por_colab[rv.colaborador_id] = {}
+                valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
 
-            for fila in query_resultados:
-                b2 = float(fila.total)
-                c2 = float(fila.contestaron)
+        # Función recursiva para construir el árbol e insertar en orden Padre -> Hijos
+        def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
+            if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
+                return
+
+            subcat_actual = lista_subcats[subcat_idx]
+            cat_id_curr = subcat_actual['id']
+            nivel_curr = subcat_actual['nivel']
+
+            # Agrupar colaboradores del subconjunto por el valor en este nivel
+            agrupados = {}
+            for colab_id in colabs_subconjunto:
+                val = valores_por_colab.get(colab_id, {}).get(cat_id_curr)
+                if val and str(val).strip() and str(val).lower() != 'nan':
+                    val_str = str(val).strip()
+                    if val_str not in agrupados:
+                        agrupados[val_str] = []
+                    agrupados[val_str].append(colab_id)
+
+            # Escribir cada grupo del nivel actual y procesar inmediatamente a sus hijos
+            for val_nombre, ids_hijos in agrupados.items():
+                b2 = float(len(ids_hijos))
+                c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
 
                 if 0 < c2 < 5:
-                    row_data = [fila.valor, int(b2), '-', '-', '-']
+                    row_data = [val_nombre, int(b2), '-', '-', '-']
                 else:
                     pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
                     margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
                     margen_str = f'{margen}%' if margen != '-' else '-'
                     pct_str = f'{pct}%'
-                    row_data = [fila.valor, int(b2), int(c2), pct_str, margen_str]
+                    row_data = [val_nombre, int(b2), int(c2), pct_str, margen_str]
 
                 ws.append(row_data)
                 row_idx = ws.max_row
 
-                # Formatear celdas con sangría y color del nivel correspondiente
-                font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_actual <= 3), color=color_hex)
-                alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_actual - 1))
+                # Formatos de texto, sangría y color según el nivel exacto
+                color_hex = COLORES_NIVELES.get(nivel_curr, '000000')
+                font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_curr <= 3), color=color_hex)
+                alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_curr - 1))
 
                 for col_idx in range(1, 6):
                     cell = ws.cell(row=row_idx, column=col_idx)
@@ -944,11 +957,17 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                         cell.font = Font(name='Century Gothic', size=10)
                         cell.alignment = alineacion_centro
 
-        # Autoajuste del ancho de las columnas
+                # Llamada recursiva para colgar las subáreas hijas inmediatamente debajo
+                procesar_nivel_recursivo(ids_hijos, subcat_idx + 1)
+
+        # Iniciar el árbol con toda la población
+        procesar_nivel_recursivo(colab_ids_list, 0)
+
+        # Autoajuste de columnas
         for col in ws.columns:
             max_len = max(len(str(cell.value or '')) for cell in col)
             col_letter = openpyxl.utils.get_column_letter(col[0].column)
-            ws.column_dimensions[col_letter].width = max(max_len + 8, 20)
+            ws.column_dimensions[col_letter].width = max(max_len + 8, 22)
 
     db.close()
 
