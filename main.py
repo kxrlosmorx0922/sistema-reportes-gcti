@@ -816,16 +816,26 @@ def visor_reportes_admin():
 @app.route('/api/progreso-global')
 def progreso_global():
     empresa_id = request.args.get('empresa_id')
-    
-    total_enviadas = 4073
-    total_respondidas = 1538
-    porcentaje = (total_respondidas / total_enviadas) * 100 if total_enviadas > 0 else 0
-    
-    return jsonify({
-        "total_enviadas": total_enviadas,
-        "total_respondidas": total_respondidas,
-        "porcentaje": round(porcentaje, 1)
-    })
+    if not empresa_id:
+        return jsonify({"total_enviadas": 0, "total_respondidas": 0, "porcentaje": 0.0})
+        
+    db = SessionLocal()
+    try:
+        emp_id = int(empresa_id)
+        total_enviadas = db.query(func.count(Colaborador.id)).filter(Colaborador.empresa_id == emp_id).scalar() or 0
+        total_respondidas = db.query(func.count(Participacion.id)).join(Colaborador).filter(Colaborador.empresa_id == emp_id).scalar() or 0
+        porcentaje = (total_respondidas / total_enviadas * 100) if total_enviadas > 0 else 0.0
+        
+        return jsonify({
+            "total_enviadas": total_enviadas,
+            "total_respondidas": total_respondidas,
+            "porcentaje": round(porcentaje, 1)
+        })
+    except Exception as e:
+        print(f"❌ Error en progreso global: {e}")
+        return jsonify({"total_enviadas": 0, "total_respondidas": 0, "porcentaje": 0.0})
+    finally:
+        db.close()
 
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
   """Genera un libro de Excel en memoria usando openpyxl con estilos de GCTI®:
@@ -1037,6 +1047,33 @@ def enviar_reporte_email():
     return (
         jsonify({'error': f'Falló el envío por correo electrónico: {str(e)}'}),
         500,
+    )
+@app.route('/admin/descargar-reporte-excel', methods=['POST'])
+def descargar_reporte_excel():
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
+        return jsonify({'error': 'No autorizado'}), 401
+
+    data = request.get_json()
+    empresa_id = data.get('empresa_id')
+    categorias_ids = data.get('categorias_ids', [])
+
+    if not empresa_id or not categorias_ids:
+        return jsonify({'error': 'Debe seleccionar al menos una demografía.'}), 400
+
+    db = SessionLocal()
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    nombre_empresa = empresa.nombre if empresa else 'Organizacion'
+    db.close()
+
+    excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
+    nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
+
+    from flask import send_file
+    return send_file(
+        excel_stream,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=nombre_archivo
     )
 
 print("5. Intentando encender el servidor Flask en el entorno de Render...")
