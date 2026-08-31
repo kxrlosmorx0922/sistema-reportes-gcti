@@ -628,27 +628,31 @@ def cargar_participacion():
     db = SessionLocal()
     try:
         empresa_id_int = int(empresa_id)
-        
-        # 1. Soporte para .xlsx y .csv
         nombre_archivo = archivo.filename.lower()
+        
+        # 1. Lectura automática según la extensión (.csv o .xlsx)
         if nombre_archivo.endswith('.csv'):
-            df = pd.read_csv(archivo)
+            try:
+                df = pd.read_csv(archivo, encoding='utf-8')
+            except Exception:
+                archivo.seek(0)
+                df = pd.read_csv(archivo, encoding='latin1')
         else:
             df = pd.read_excel(archivo)
             
         columnas_originales = df.columns.tolist()
         
-        # Identificar dinámicamente la columna de Email (Columna A / Email)
+        # Identificar la columna de Email (Columna A / Email / Correo)
         col_email = next((c for c in columnas_originales if 'email' in c.lower().replace('-', '').replace(' ', '') or 'correo' in c.lower()), columnas_originales[0])
         
-        # Identificar la columna de estado/respuesta si existe (Response / Status)
+        # Identificar columna de estado si existe (Response / Status)
         col_response = next((c for c in columnas_originales if 'response' in c.lower() or 'status' in c.lower() or 'estado' in c.lower()), None)
         
-        # 2. Cargar todos los colaboradores de esta empresa desde la BD
+        # 2. Cargar colaboradores registrados para esta empresa
         colaboradores_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id_int).all()
         mapa_colaboradores = {c.email.strip().lower(): c.id for c in colaboradores_db if c.email}
         
-        # Participaciones existentes para no duplicar
+        # Evitar registros duplicados
         participaciones_existentes = {p[0] for p in db.query(Participacion.colaborador_id).all()}
         
         nuevas_participaciones = []
@@ -661,13 +665,13 @@ def cargar_participacion():
                 
             email_val = str(email_raw).strip().lower()
             
-            # Verificar si respondió (si hay columna de respuesta, filtramos 'Not started')
+            # Filtrar registros que aún no hayan iniciado
             if col_response and pd.notna(fila.get(col_response)):
                 val_resp = str(fila.get(col_response)).strip().lower()
                 if 'not start' in val_resp or 'sin iniciar' in val_resp:
-                    continue  # Aún no ha contestado
+                    continue
             
-            # Si el correo coincide con un colaborador registrado
+            # Match con la base de colaboradores
             if email_val in mapa_colaboradores:
                 colab_id = mapa_colaboradores[email_val]
                 if colab_id not in participaciones_existentes:
@@ -675,18 +679,18 @@ def cargar_participacion():
                     participaciones_existentes.add(colab_id)
                     conteo_nuevas += 1
                     
-        # Inserción masiva super rápida
+        # Inserción masiva ultra rápida
         if nuevas_participaciones:
             db.bulk_insert_mappings(Participacion, nuevas_participaciones)
             db.commit()
-            flash(f"✅ Reporte de participación actualizado. Se registraron {conteo_nuevas} respuestas válidas.", "success")
+            flash(f"✅ Reporte de participación actualizado. Se registraron {conteo_nuevas} respuestas de participación.", "success")
         else:
-            flash("ℹ️ No se encontraron nuevas participaciones para registrar.", "info")
+            flash("ℹ️ El archivo fue procesado, pero no se encontraron nuevas participaciones para registrar.", "info")
             
     except Exception as e:
         db.rollback()
         print(f"❌ Error en carga de participación: {str(e)}")
-        flash(f"⚠️ Error al actualizar participación: {str(e)}", "danger")
+        flash(f"⚠️ Error al procesar el archivo de participación: {str(e)}", "danger")
     finally:
         db.close()
         
