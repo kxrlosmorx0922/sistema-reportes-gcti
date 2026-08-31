@@ -11,10 +11,10 @@ import openpyxl
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 import pandas as pd
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
-from database.models import Colaborador, CategoriaDemografica, ValorDemografico, Participacion
-from database.models import Base, Empresa, Usuario 
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+from database.models import Colaborador, CategoriaDemografica, ValorDemografico, Participacion, Base, Empresa, Usuario
 from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -281,13 +281,11 @@ def panel_admin():
     
     try:
         tabla_real = Empresa.__table__.name
-        # Consulta segura con fallback
         resultado_raw = db.execute(text(f"SELECT id, nombre, fecha_inicio, fecha_cierre, cerrada, nombre_cliente, correo_cliente, correo_coordinador, calendar_event_id FROM {tabla_real}")).fetchall()
         
         for fila in resultado_raw:
             usr = db.query(Usuario).filter(Usuario.empresa_id == fila[0], Usuario.rol == 'cliente').first()
             
-            # Obtención segura de índices
             f_ini = fila[2] if len(fila) > 2 and fila[2] else '-'
             f_cie = fila[3] if len(fila) > 3 and fila[3] else '-'
             cer = 1 if len(fila) > 4 and fila[4] == 1 else 0
@@ -442,7 +440,6 @@ def eliminar_organizacion(empresa_id):
         if res_ev and res_ev[0] and res_ev[0] != '-':
             eliminar_evento_google_calendar(res_ev[0])
             
-        # Corregido con SQL nativo para evitar bloqueos SSL de subconsultas pesadas en Neon
         emp_id_int = int(empresa_id)
         colab_ids = [c[0] for c in db.query(Colaborador.id).filter(Colaborador.empresa_id == emp_id_int).all()]
         if colab_ids:
@@ -454,7 +451,7 @@ def eliminar_organizacion(empresa_id):
         db.execute(text("DELETE FROM usuarios WHERE empresa_id = :emp_id"), {"emp_id": emp_id_int})
         db.execute(text(f"DELETE FROM {tabla_real} WHERE id = :id"), {"id": empresa_id})
         db.commit()
-        flash("Se ha eliminado la organización de la base de datos. Se eliminaron las tareas recurrentes", "success")
+        flash("Se ha eliminado la organización de la base de datos.", "success")
     except Exception as e:
         db.rollback()
         flash(f"❌ Error al eliminar organización: {str(e)}", "danger")
@@ -495,7 +492,6 @@ def cargar_colaboradores():
         empresa_id = int(empresa_id_raw)
         nombre_archivo = archivo.filename.lower()
         
-        # 1. Lectura del archivo (Excel o CSV)
         if nombre_archivo.endswith('.csv'):
             try:
                 df = pd.read_csv(archivo, encoding='utf-8')
@@ -508,12 +504,10 @@ def cargar_colaboradores():
         df = df.where(pd.notnull(df), None)
         columnas_originales = df.columns.tolist()
         
-        # Posición estándar fija: Columna A (ID), Columna B (Nombre), Columna C (E-Mail)
         col_id_name = columnas_originales[0]
         col_nombre_name = columnas_originales[1] if len(columnas_originales) > 1 else columnas_originales[0]
         col_email_name = columnas_originales[2] if len(columnas_originales) > 2 else columnas_originales[0]
         
-        # Identificación de segmentos demográficos (de la Columna D en adelante)
         columnas_fijas = {col_id_name, col_nombre_name, col_email_name}
         columnas_demograficas = [
             c for c in columnas_originales 
@@ -523,7 +517,6 @@ def cargar_colaboradores():
             and 'tipo de comunicado' not in c.lower().replace('ó', 'o').replace('á', 'a')
         ]
 
-        # Limpieza previa de datos anteriores para esta empresa
         colab_ids = [c[0] for c in db.query(Colaborador.id).filter(Colaborador.empresa_id == empresa_id).all()]
         if colab_ids:
             db.query(ValorDemografico).filter(ValorDemografico.colaborador_id.in_(colab_ids)).delete(synchronize_session=False)
@@ -533,7 +526,6 @@ def cargar_colaboradores():
         db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).delete(synchronize_session=False)
         db.commit()
 
-        # Inserción masiva de Categorías Demográficas
         categorias_dicts = [{'nombre': col_demog, 'empresa_id': empresa_id} for col_demog in columnas_demograficas]
         db.bulk_insert_mappings(CategoriaDemografica, categorias_dicts)
         db.commit()
@@ -541,7 +533,6 @@ def cargar_colaboradores():
         cats_db = db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).all()
         mapa_categorias = {cat.nombre: cat.id for cat in cats_db}
 
-        # Inserción masiva de Colaboradores
         colaboradores_dicts = []
         for index, fila in df.iterrows():
             id_raw = fila[col_id_name]
@@ -564,7 +555,6 @@ def cargar_colaboradores():
         db.bulk_insert_mappings(Colaborador, colaboradores_dicts)
         db.commit()
 
-        # Inserción masiva de Valores Demográficos
         colabs_db = db.query(Colaborador.id, Colaborador.identificacion).filter(Colaborador.empresa_id == empresa_id).all()
         mapa_colaboradores = {c.identificacion: c.id for c in colabs_db}
         
@@ -602,7 +592,6 @@ def cargar_colaboradores():
         
     return redirect('/admin')
 
-
 # =================================================================
 # 📊 PASO 3: CARGAR PARTICIPACIÓN (LEE COLUMNA A PARA BUSCARX)
 # =================================================================
@@ -623,7 +612,6 @@ def cargar_participacion():
         empresa_id_int = int(empresa_id)
         nombre_archivo = archivo.filename.lower()
         
-        # 1. Lectura transparente de CSV o Excel
         if nombre_archivo.endswith('.csv'):
             try:
                 df = pd.read_csv(archivo, encoding='utf-8')
@@ -633,10 +621,8 @@ def cargar_participacion():
         else:
             df = pd.read_excel(archivo)
             
-        # Posición fija para el match: Columna A (Email de Alchemer)
         col_email_idx = 0
         
-        # 2. Cargar diccionario de búsqueda (BUSCARX) desde la BD del Paso 2 (Columna C)
         colaboradores_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id_int).all()
         mapa_colaboradores = {c.email.strip().lower(): c.id for c in colaboradores_db if c.email}
         
@@ -645,7 +631,6 @@ def cargar_participacion():
         nuevas_participaciones = []
         conteo_respuestas = 0
         
-        # 3. Recorrer Columna A y hacer el "BUSCARX" contra el mapa
         for _, fila in df.iterrows():
             email_raw = fila.iloc[col_email_idx]
             if pd.isna(email_raw) or not email_raw:
@@ -653,7 +638,6 @@ def cargar_participacion():
                 
             email_val = str(email_raw).strip().lower()
             
-            # Si hace Match con la Columna C registrada en el Paso 2
             if email_val in mapa_colaboradores:
                 colab_id = mapa_colaboradores[email_val]
                 if colab_id not in participaciones_existentes:
@@ -661,7 +645,6 @@ def cargar_participacion():
                     participaciones_existentes.add(colab_id)
                     conteo_respuestas += 1
                     
-        # Inserción masiva en Neon
         if nuevas_participaciones:
             db.bulk_insert_mappings(Participacion, nuevas_participaciones)
             db.commit()
@@ -688,7 +671,6 @@ def restablecer_password():
     tabla_real = Empresa.__table__.name
     usuario, empresa_asoc = None, None
     
-    # 1. Buscar en usuarios
     usuario = db.query(Usuario).filter(Usuario.email == identificador).first()
     if usuario and usuario.empresa_id:
         emp_res = db.execute(text(f"SELECT id, nombre, nombre_cliente, correo_cliente, correo_coordinador FROM {tabla_real} WHERE id = :id"), {"id": usuario.empresa_id}).fetchone()
@@ -715,29 +697,23 @@ def restablecer_password():
     db.close()
     return redirect('/login')
 
-import math # Asegúrate de que import math esté arriba con los demás imports
-
 def calcular_margen_error(esperadas, recibidas):
-  """Aplica la fórmula matemática exacta:
+    try:
+        b2 = float(esperadas)
+        c2 = float(recibidas)
 
-  =IF(C2>B2, "-", IF(C2="", "", 0.0196*50*(B2-C2)/(SQRT(C2)*(B2-1))*100))
-  """
-  try:
-    b2 = float(esperadas)
-    c2 = float(recibidas)
+        if c2 > b2:
+            return "-"
+        if c2 == 0 or b2 <= 1:
+            return 0.0
 
-    if c2 > b2:
-      return "-"
-    if c2 == 0 or b2 <= 1:
-      return 0.0
+        numerador = 0.0196 * 50 * (b2 - c2)
+        denominador = math.sqrt(c2) * (b2 - 1)
 
-    numerador = 0.0196 * 50 * (b2 - c2)
-    denominador = math.sqrt(c2) * (b2 - 1)
-
-    resultado = (numerador / denominador) * 100
-    return round(resultado, 2)
-  except Exception:
-    return "-"
+        resultado = (numerador / denominador) * 100
+        return round(resultado, 2)
+    except Exception:
+        return "-"
 
 @app.route('/api/metricas/<int:categoria_id>')
 def obtener_metricas(categoria_id):
@@ -767,7 +743,6 @@ def obtener_metricas(categoria_id):
         b2 = float(fila.total)
         c2 = float(fila.contestaron)
         
-        # Fórmula exacta del Excel
         if c2 > b2:
             margen = "-"
         elif c2 == 0 or b2 <= 1:
@@ -839,7 +814,7 @@ def progreso_global():
 
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # Eliminar hoja por defecto
+    wb.remove(wb.active)
 
     db = SessionLocal()
 
@@ -923,11 +898,8 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
     output = io.BytesIO()
     wb.save(output)
-    output.seek(0) # <-- Garantizar posicion en byte 0
+    output.seek(0)
     return output
-
-
-from flask import send_file
 
 @app.route('/admin/descargar-reporte-excel', methods=['POST'])
 def descargar_reporte_excel():
@@ -948,10 +920,8 @@ def descargar_reporte_excel():
         nombre_empresa = empresa.nombre if empresa else 'Organizacion'
         db.close()
 
-        # Generar el stream binario del Excel
         excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
-        excel_stream.seek(0)  # <-- Aseguramos reset de lectura
-        
+        excel_stream.seek(0)
         nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
 
         return send_file(
@@ -963,49 +933,38 @@ def descargar_reporte_excel():
     except Exception as e:
         print(f"❌ Error crítico al generar Excel: {str(e)}")
         return jsonify({'error': f'Falló la generación del archivo Excel: {str(e)}'}), 500
-        
-from email.mime.application import MIMEApplication
-
 
 @app.route('/admin/enviar-reporte-email', methods=['POST'])
 def enviar_reporte_email():
-  if 'usuario_id' not in session or session['rol'] not in [
-      'admin',
-      'coordinador',
-  ]:
-    return jsonify({'error': 'No autorizado'}), 401
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
+        return jsonify({'error': 'No autorizado'}), 401
 
-  data = request.get_json()
-  empresa_id = data.get('empresa_id')
-  categorias_ids = data.get('categorias_ids', [])
+    data = request.get_json() or {}
+    empresa_id = data.get('empresa_id')
+    categorias_ids = data.get('categorias_ids', [])
 
-  if not empresa_id or not categorias_ids:
-    return (
-        jsonify({'error': 'Debe seleccionar al menos una demografía.'}),
-        400,
-    )
+    if not empresa_id or not categorias_ids:
+        return jsonify({'error': 'Debe seleccionar al menos una demografía.'}), 400
 
-  db = SessionLocal()
-  empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
-  nombre_empresa = empresa.nombre if empresa else 'Organización'
-  db.close()
+    db = SessionLocal()
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    nombre_empresa = empresa.nombre if empresa else 'Organización'
+    db.close()
 
-  # 1. Generar el archivo Excel en memoria
-  excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
+    excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
+    excel_stream.seek(0)
 
-  # 2. Configurar destinatarios y encabezados del correo
-  destinatario_principal = 'roberto.cruz@greatculturetoinnovate.net'
-  copia_cc = 'german.romero@peoplesvoice.co'
-  remitente = 'carlos.mora@peoplesvoice.co'
+    destinatario_principal = 'roberto.cruz@greatculturetoinnovate.net'
+    copia_cc = 'german.romero@peoplesvoice.co'
+    remitente = 'carlos.mora@peoplesvoice.co'
 
-  msg = MIMEMultipart()
-  msg['From'] = f'Portal de Reportes GCTI® <{remitente}>'
-  msg['To'] = destinatario_principal
-  msg['Cc'] = copia_cc
-  msg['Subject'] = f'Envío de reporte de participación — {nombre_empresa}'
+    msg = MIMEMultipart()
+    msg['From'] = f'Portal de Reportes GCTI® <{remitente}>'
+    msg['To'] = destinatario_principal
+    msg['Cc'] = copia_cc
+    msg['Subject'] = f'Envío de reporte de participación — {nombre_empresa}'
 
-  # 3. Redacción formal ajustada dinámicamente con el nombre de la empresa
-  cuerpo_html = f"""
+    cuerpo_html = f"""
     <html>
     <body style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #333; line-height: 1.6;">
         <div style="max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #edf2f7; border-radius: 10px; background-color: #ffffff;">
@@ -1020,75 +979,27 @@ def enviar_reporte_email():
     </body>
     </html>
     """
-  msg.attach(MIMEText(cuerpo_html, 'html'))
+    msg.attach(MIMEText(cuerpo_html, 'html'))
 
-  # 4. Adjuntar el archivo Excel corregido sin problemas de sintaxis
-  parte_adjunto = MIMEApplication(
-      excel_stream.read(),
-      _subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  )
-  nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
-  parte_adjunto.add_header(
-      'Content-Disposition', 'attachment', filename=nombre_archivo
-  )
-  msg.attach(parte_adjunto)
-
-  # 5. Envío mediante servidor SMTP Gmail
-  try:
-    server = smtplib.SMTP('smtp.gmail.com', 587)
-    server.starttls()
-    server.login(remitente, 'hxhjkhqleflgvmoo')
-    recipients = [destinatario_principal, copia_cc]
-    server.sendmail(remitente, recipients, msg.as_string())
-    server.quit()
-    return jsonify({
-        'success': True,
-        'mensaje': (
-            f'📧 Reporte de {nombre_empresa} enviado por correo exitosamente.'
-        ),
-    })
-  except Exception as e:
-    return (
-        jsonify({'error': f'Falló el envío por correo electrónico: {str(e)}'}),
-        500,
+    parte_adjunto = MIMEApplication(
+        excel_stream.read(),
+        _subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
-
-# Asegúrate de incluir send_file en tus imports de flask al inicio:
-# from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
-
-@app.route('/admin/descargar-reporte-excel', methods=['POST'])
-def descargar_reporte_excel():
-    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
-        return jsonify({'error': 'No autorizado'}), 401
+    nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
+    parte_adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_archivo)
+    msg.attach(parte_adjunto)
 
     try:
-        data = request.get_json() or {}
-        empresa_id_raw = data.get('empresa_id')
-        categorias_ids = data.get('categorias_ids', [])
-
-        if not empresa_id_raw or not categorias_ids:
-            return jsonify({'error': 'Debe seleccionar la organización y al menos una demografía.'}), 400
-
-        empresa_id = int(empresa_id_raw)
-        db = SessionLocal()
-        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
-        nombre_empresa = empresa.nombre if empresa else 'Organizacion'
-        db.close()
-
-        # Generar el stream binario del Excel
-        excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
-        nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
-
-        from flask import send_file
-        return send_file(
-            excel_stream,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=nombre_archivo
-        )
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(remitente, 'hxhjkhqleflgvmoo')
+        recipients = [destinatario_principal, copia_cc]
+        server.sendmail(remitente, recipients, msg.as_string())
+        server.quit()
+        return jsonify({'success': True, 'mensaje': f'📧 Reporte de {nombre_empresa} enviado por correo exitosamente.'})
     except Exception as e:
-        print(f"❌ Error crítico al generar Excel: {str(e)}")
-        return jsonify({'error': f'Falló la generación del archivo Excel: {str(e)}'}), 500
+        return jsonify({'error': f'Falló el envío por correo electrónico: {str(e)}'}), 500
+
 print("5. Intentando encender el servidor Flask en el entorno de Render...")
 
 if __name__ == '__main__':
