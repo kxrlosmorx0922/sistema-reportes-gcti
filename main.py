@@ -923,10 +923,47 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
     output = io.BytesIO()
     wb.save(output)
-    output.seek(0)
+    output.seek(0) # <-- Garantizar posicion en byte 0
     return output
 
 
+from flask import send_file
+
+@app.route('/admin/descargar-reporte-excel', methods=['POST'])
+def descargar_reporte_excel():
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
+        return jsonify({'error': 'No autorizado'}), 401
+
+    try:
+        data = request.get_json() or {}
+        empresa_id_raw = data.get('empresa_id')
+        categorias_ids = data.get('categorias_ids', [])
+
+        if not empresa_id_raw or not categorias_ids:
+            return jsonify({'error': 'Debe seleccionar la organización y al menos una demografía.'}), 400
+
+        empresa_id = int(empresa_id_raw)
+        db = SessionLocal()
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+        nombre_empresa = empresa.nombre if empresa else 'Organizacion'
+        db.close()
+
+        # Generar el stream binario del Excel
+        excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
+        excel_stream.seek(0)  # <-- Aseguramos reset de lectura
+        
+        nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
+
+        return send_file(
+            excel_stream,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=nombre_archivo
+        )
+    except Exception as e:
+        print(f"❌ Error crítico al generar Excel: {str(e)}")
+        return jsonify({'error': f'Falló la generación del archivo Excel: {str(e)}'}), 500
+        
 from email.mime.application import MIMEApplication
 
 
