@@ -353,17 +353,18 @@ def crear_empresa():
     if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: 
         return redirect('/login')
         
-    nombre_emp = request.form.get('nombre_empresa', '').strip()
+    # Leemos las casillas con los nombres exactos que vienen del formulario HTML
+    nombre_emp = (request.form.get('organizacion') or request.form.get('nombre_empresa') or '').strip()
+    correo_coor = (request.form.get('correo_cdp') or request.form.get('correo_coordinador') or '').strip().lower()
+    
     fecha_ini = request.form.get('fecha_inicio', '').strip()
     fecha_cie = request.form.get('fecha_cierre', '').strip()
-    correo_coor = request.form.get('correo_coordinador', '').strip().lower()
     
-    # Opcionales (por si no vienen en el formulario)
-    nombre_cli = request.form.get('nombre_cliente', '').strip() or nombre_emp
-    correo_cli = request.form.get('correo_cliente', '').strip().lower() or correo_coor
+    # Opcionales (para retrocompatibilidad)
+    nombre_cli = (request.form.get('nombre_cliente') or nombre_emp).strip()
+    correo_cli = (request.form.get('correo_cliente') or correo_coor).strip().lower()
     
-    # Validar solo los campos obligatorios actuales
-    if nombre_emp and correo_coor:
+    if nombre_emp:
         db = SessionLocal()
         try:
             if not db.query(Empresa).filter(Empresa.nombre == nombre_emp).first():
@@ -372,7 +373,7 @@ def crear_empresa():
                 db.flush()
                 
                 event_id = '-'
-                if fecha_ini and fecha_cie:
+                if fecha_ini and fecha_cie and correo_coor:
                     try:
                         event_id = crear_evento_google_calendar(nombre_emp, fecha_ini, fecha_cie, correo_coor) or '-'
                     except Exception as e:
@@ -380,10 +381,12 @@ def crear_empresa():
                         event_id = '-'
                 
                 tabla_real = Empresa.__table__.name
-                db.execute(text(f"UPDATE {tabla_real} SET fecha_inicio=:ini, fecha_cierre=:cie, cerrada=0, nombre_cliente=:n_cli, correo_cliente=:c_cli, correo_coordinador=:c_coor, calendar_event_id=:ev_id WHERE id=:id"),
-                        {"ini": fecha_ini, "cie": fecha_cie, "n_cli": nombre_cli, "c_cli": correo_cli, "c_coor": correo_coor, "ev_id": event_id, "id": nueva_empresa.id})
+                db.execute(
+                    text(f"UPDATE {tabla_real} SET fecha_inicio=:ini, fecha_cierre=:cie, cerrada=0, nombre_cliente=:n_cli, correo_cliente=:c_cli, correo_coordinador=:c_coor, calendar_event_id=:ev_id WHERE id=:id"),
+                    {"ini": fecha_ini, "cie": fecha_cie, "n_cli": nombre_cli, "c_cli": correo_cli, "c_coor": correo_coor, "ev_id": event_id, "id": nueva_empresa.id}
+                )
                 
-                # Crear usuario asociado
+                # Generar usuario cliente asociado
                 email_cliente = generar_username_cliente(nombre_cli)
                 password_cliente = generar_password_aleatorio()
                 
@@ -398,16 +401,16 @@ def crear_empresa():
                 db.execute(text(f"UPDATE {tabla_usuario} SET nombre = :nom WHERE id = :id"), {"nom": nombre_cli, "id": nuevo_u.id})
                 db.commit()
                 
-                flash(f"🏢 ¡Organización '{nombre_emp}' creada con éxito! Cuenta asignada: {email_cliente}", "success")
+                flash(f"🏢 ¡Organización '{nombre_emp}' creada con éxito! Usuario asignado: {email_cliente}", "success")
             else:
                 flash("⚠️ Esa Organización ya se encuentra registrada.", "danger")
         except Exception as e:
             db.rollback()
-            flash(f"❌ Error al guardar en base de datos: {str(e)}", "danger")
+            flash(f"❌ Error en base de datos: {str(e)}", "danger")
         finally:
             db.close()
     else:
-        flash("⚠️ Por favor completa el Nombre de la Organización y el Correo del Coordinador.", "warning")
+        flash("⚠️ Por favor ingrese el nombre de la Organización.", "warning")
         
     return redirect('/admin')
 
