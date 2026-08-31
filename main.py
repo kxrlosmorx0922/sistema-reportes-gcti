@@ -630,7 +630,7 @@ def cargar_participacion():
         empresa_id_int = int(empresa_id)
         nombre_archivo = archivo.filename.lower()
         
-        # 1. Lectura automática según la extensión (.csv o .xlsx)
+        # 1. Lectura de CSV o Excel
         if nombre_archivo.endswith('.csv'):
             try:
                 df = pd.read_csv(archivo, encoding='utf-8')
@@ -640,57 +640,53 @@ def cargar_participacion():
         else:
             df = pd.read_excel(archivo)
             
-        columnas_originales = df.columns.tolist()
+        # 2. Tomar Columna A (Email) y Columna C (Response) directamente por posición
+        col_email_idx = 0
+        col_response_idx = 2 if len(df.columns) >= 3 else None
         
-        # Identificar la columna de Email (Columna A / Email / Correo)
-        col_email = next((c for c in columnas_originales if 'email' in c.lower().replace('-', '').replace(' ', '') or 'correo' in c.lower()), columnas_originales[0])
-        
-        # Identificar columna de estado si existe (Response / Status)
-        col_response = next((c for c in columnas_originales if 'response' in c.lower() or 'status' in c.lower() or 'estado' in c.lower()), None)
-        
-        # 2. Cargar colaboradores registrados para esta empresa
+        # 3. Cargar colaboradores de esta empresa
         colaboradores_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id_int).all()
         mapa_colaboradores = {c.email.strip().lower(): c.id for c in colaboradores_db if c.email}
         
-        # Evitar registros duplicados
+        # Evitar duplicados
         participaciones_existentes = {p[0] for p in db.query(Participacion.colaborador_id).all()}
         
         nuevas_participaciones = []
-        conteo_nuevas = 0
+        conteo_respuestas = 0
         
         for _, fila in df.iterrows():
-            email_raw = fila.get(col_email)
+            email_raw = fila.iloc[col_email_idx]
             if pd.isna(email_raw) or not email_raw:
                 continue
                 
             email_val = str(email_raw).strip().lower()
             
-            # Filtrar registros que aún no hayan iniciado
-            if col_response and pd.notna(fila.get(col_response)):
-                val_resp = str(fila.get(col_response)).strip().lower()
-                if 'not start' in val_resp or 'sin iniciar' in val_resp:
+            # Si hay columna de respuesta (Columna C), descartamos 'Not started'
+            if col_response_idx is not None and pd.notna(fila.iloc[col_response_idx]):
+                estado_resp = str(fila.iloc[col_response_idx]).strip().lower()
+                if 'not start' in estado_resp or 'sin iniciar' in estado_resp:
                     continue
             
-            # Match con la base de colaboradores
+            # Match con el colaborador
             if email_val in mapa_colaboradores:
                 colab_id = mapa_colaboradores[email_val]
                 if colab_id not in participaciones_existentes:
                     nuevas_participaciones.append({'colaborador_id': colab_id, 'contesto': True})
                     participaciones_existentes.add(colab_id)
-                    conteo_nuevas += 1
+                    conteo_respuestas += 1
                     
-        # Inserción masiva ultra rápida
+        # Inserción masiva
         if nuevas_participaciones:
             db.bulk_insert_mappings(Participacion, nuevas_participaciones)
             db.commit()
-            flash(f"✅ Reporte de participación actualizado. Se registraron {conteo_nuevas} respuestas de participación.", "success")
+            flash(f"✅ Reporte de participación actualizado. Se registraron {conteo_respuestas} respuestas recibidas.", "success")
         else:
-            flash("ℹ️ El archivo fue procesado, pero no se encontraron nuevas participaciones para registrar.", "info")
+            flash("ℹ️ Procesado correctamente, pero no hay nuevas respuestas para registrar.", "info")
             
     except Exception as e:
         db.rollback()
         print(f"❌ Error en carga de participación: {str(e)}")
-        flash(f"⚠️ Error al procesar el archivo de participación: {str(e)}", "danger")
+        flash(f"⚠️ Error al procesar el archivo: {str(e)}", "danger")
     finally:
         db.close()
         
