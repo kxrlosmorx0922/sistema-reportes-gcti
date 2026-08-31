@@ -615,45 +615,81 @@ def cargar_colaboradores():
 
 @app.route('/admin/cargar-participacion', methods=['POST'])
 def cargar_participacion():
-    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: return redirect('/login')
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: 
+        return redirect('/login')
+        
     empresa_id = request.form.get('empresa_id')
     archivo = request.files.get('archivo_participacion')
-    if not empresa_id or not archivo: return redirect('/admin')
-    db = SessionLocal()
-    tabla_real = Empresa.__table__.name
     
-    org_status = db.execute(text(f"SELECT cerrada FROM {tabla_real} WHERE id = :id"), {"id": empresa_id}).fetchone()
-    
-    if org_status and int(org_status[0] or 0) == 1:
-        db.close()
+    if not empresa_id or not archivo: 
+        flash("Por favor seleccione la organización y el archivo de participación.", "warning")
         return redirect('/admin')
+        
+    db = SessionLocal()
     try:
-        df = pd.read_excel(archivo)
+        empresa_id_int = int(empresa_id)
+        
+        # 1. Soporte para .xlsx y .csv
+        nombre_archivo = archivo.filename.lower()
+        if nombre_archivo.endswith('.csv'):
+            df = pd.read_csv(archivo)
+        else:
+            df = pd.read_excel(archivo)
+            
         columnas_originales = df.columns.tolist()
-        col_email = next((c for c in columnas_originales if 'email' in c.lower().replace('-', '') or 'correo' in c.lower()), None)
         
-        colaboradores_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id).all()
-        mapa_colaboradores = {c.email: c.id for c in colaboradores_db}
+        # Identificar dinámicamente la columna de Email (Columna A / Email)
+        col_email = next((c for c in columnas_originales if 'email' in c.lower().replace('-', '').replace(' ', '') or 'correo' in c.lower()), columnas_originales[0])
         
-        participaciones_existentes = [p[0] for p in db.query(Participacion.colaborador_id).all()]
-        ids_ya_participaron = set(participaciones_existentes)
+        # Identificar la columna de estado/respuesta si existe (Response / Status)
+        col_response = next((c for c in columnas_originales if 'response' in c.lower() or 'status' in c.lower() or 'estado' in c.lower()), None)
+        
+        # 2. Cargar todos los colaboradores de esta empresa desde la BD
+        colaboradores_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id_int).all()
+        mapa_colaboradores = {c.email.strip().lower(): c.id for c in colaboradores_db if c.email}
+        
+        # Participaciones existentes para no duplicar
+        participaciones_existentes = {p[0] for p in db.query(Participacion.colaborador_id).all()}
+        
+        nuevas_participaciones = []
+        conteo_nuevas = 0
         
         for _, fila in df.iterrows():
-            email_val = str(fila[col_email]).strip().lower()
+            email_raw = fila.get(col_email)
+            if pd.isna(email_raw) or not email_raw:
+                continue
+                
+            email_val = str(email_raw).strip().lower()
+            
+            # Verificar si respondió (si hay columna de respuesta, filtramos 'Not started')
+            if col_response and pd.notna(fila.get(col_response)):
+                val_resp = str(fila.get(col_response)).strip().lower()
+                if 'not start' in val_resp or 'sin iniciar' in val_resp:
+                    continue  # Aún no ha contestado
+            
+            # Si el correo coincide con un colaborador registrado
             if email_val in mapa_colaboradores:
-                colaborador_id = mapa_colaboradores[email_val]
-                if colaborador_id not in ids_ya_participaron:
-                    nueva_participacion = Participacion(colaborador_id=colaborador_id, contesto=True)
-                    db.add(nueva_participacion)
-                    ids_ya_participaron.add(colaborador_id)
-        db.commit()
-        flash("Reporte de participación actualizado", "success")
-    except Exception as e: 
+                colab_id = mapa_colaboradores[email_val]
+                if colab_id not in participaciones_existentes:
+                    nuevas_participaciones.append({'colaborador_id': colab_id, 'contesto': True})
+                    participaciones_existentes.add(colab_id)
+                    conteo_nuevas += 1
+                    
+        # Inserción masiva super rápida
+        if nuevas_participaciones:
+            db.bulk_insert_mappings(Participacion, nuevas_participaciones)
+            db.commit()
+            flash(f"✅ Reporte de participación actualizado. Se registraron {conteo_nuevas} respuestas válidas.", "success")
+        else:
+            flash("ℹ️ No se encontraron nuevas participaciones para registrar.", "info")
+            
+    except Exception as e:
         db.rollback()
         print(f"❌ Error en carga de participación: {str(e)}")
         flash(f"⚠️ Error al actualizar participación: {str(e)}", "danger")
     finally:
         db.close()
+        
     return redirect('/admin')
 
 @app.route('/restablecer-password', methods=['POST'])
