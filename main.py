@@ -838,126 +838,93 @@ def progreso_global():
         db.close()
 
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
-  """Genera un libro de Excel en memoria usando openpyxl con estilos de GCTI®:
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)  # Eliminar hoja por defecto
 
-  - Encabezados negros con texto blanco en negrita.
-  - Hojas separadas por cada demografía seleccionada.
-  - Columnas: Demografía, Población Objetivo, Encuestas Recibidas, (%) Avance,
-  Margen de Error (%).
-  """
-  wb = openpyxl.Workbook()
-  wb.remove(wb.active)  # Eliminar hoja por defecto
+    db = SessionLocal()
 
-  db = SessionLocal()
+    fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
+    font_encabezado = Font(name='Century Gothic', size=11, bold=True, color='FFFFFF')
+    font_datos = Font(name='Century Gothic', size=10)
+    alineacion_centro = Alignment(horizontal='center', vertical='center')
+    alineacion_izquierda = Alignment(horizontal='left', vertical='center')
+    borde_fino = Side(border_style='thin', color='D9D9D9')
+    borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-  # Estilos institucionales GCTI
-  fill_encabezado = PatternFill(
-      start_color='000000', end_color='000000', fill_type='solid'
-  )
-  font_encabezado = Font(name='Century Gothic', size=11, bold=True, color='FFFFFF')
-  font_datos = Font(name='Century Gothic', size=10)
-  alineacion_centro = Alignment(horizontal='center', vertical='center')
-  alineacion_izquierda = Alignment(horizontal='left', vertical='center')
-  borde_fino = Side(border_style='thin', color='D9D9D9')
-  borde_celda = Border(
-      left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino
-  )
+    for cat_id in categorias_ids_seleccionadas:
+        try:
+            cat_id_int = int(cat_id)
+        except (ValueError, TypeError):
+            continue
 
-  for cat_id in categorias_ids_seleccionadas:
-    categoria = (
-        db.query(CategoriaDemografica)
-        .filter(
-            CategoriaDemografica.id == int(cat_id),
-            CategoriaDemografica.empresa_id == empresa_id,
-        )
-        .first()
-    )
-    if not categoria:
-      continue
+        categoria = db.query(CategoriaDemografica).filter(
+            CategoriaDemografica.id == cat_id_int,
+            CategoriaDemografica.empresa_id == empresa_id
+        ).first()
 
-    # Limpiar nombre de pestaña (máx 31 caracteres para Excel)
-    nombre_hoja = categoria.nombre.replace('/', '-').replace('\\', '-')[:30]
-    ws = wb.create_sheet(title=nombre_hoja)
+        if not categoria:
+            continue
 
-    # Encabezados
-    headers = [
-        categoria.nombre,
-        'Población objetivo',
-        'Encuestas recibidas',
-        '(%) avance',
-        'Margen de error (%)',
-    ]
-    ws.append(headers)
+        nombre_hoja = str(categoria.nombre).replace('/', '-').replace('\\', '-')[:30]
+        ws = wb.create_sheet(title=nombre_hoja)
 
-    # Formatear Fila de Encabezados (Fila 1)
-    for col_num in range(1, 6):
-      cell = ws.cell(row=1, column=col_num)
-      cell.fill = fill_encabezado
-      cell.font = font_encabezado
-      cell.alignment = alineacion_centro if col_num > 1 else alineacion_izquierda
+        headers = [categoria.nombre, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
+        ws.append(headers)
 
-    # Consultar datos reales desde la BD
-    query_resultados = (
-        db.query(
-            ValorDemografico.valor,
-            func.count(Colaborador.id).label('total'),
-            func.count(Participacion.id).label('contestaron'),
-        )
-        .join(Colaborador, ValorDemografico.colaborador_id == Colaborador.id)
-        .outerjoin(
-            Participacion, Colaborador.id == Participacion.colaborador_id
-        )
-        .filter(
-            ValorDemografico.categoria_id == categoria.id,
-            Colaborador.empresa_id == empresa_id,
-        )
-        .group_by(ValorDemografico.valor)
-        .all()
-    )
+        for col_num in range(1, 6):
+            cell = ws.cell(row=1, column=col_num)
+            cell.fill = fill_encabezado
+            cell.font = font_encabezado
+            cell.alignment = alineacion_centro if col_num > 1 else alineacion_izquierda
 
-    # Escribir filas
-    for fila in query_resultados:
-      b2 = float(fila.total)
-      c2 = float(fila.contestaron)
-
-      if 0 < c2 < 5:
-        row_data = [fila.valor, fila.total, '-', '-', '-']
-      else:
-        pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
-        margen = (
-            '-'
-            if c2 > b2
-            else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
-        )
-        margen_str = f'{margen}%' if margen != '-' else '-'
-        pct_str = f'{pct}%'
-        row_data = [fila.valor, fila.total, int(c2), pct_str, margen_str]
-
-      ws.append(row_data)
-
-    # Ajustes estéticos de bordes y ancho de columna
-    for row in ws.iter_rows(
-        min_row=2, max_row=ws.max_row, min_col=1, max_col=5
-    ):
-      for idx, cell in enumerate(row):
-        cell.font = font_datos
-        cell.border = borde_celda
-        cell.alignment = (
-            alineacion_centro if idx > 0 else alineacion_izquierda
+        query_resultados = (
+            db.query(
+                ValorDemografico.valor,
+                func.count(Colaborador.id).label('total'),
+                func.count(Participacion.id).label('contestaron')
+            )
+            .join(Colaborador, ValorDemografico.colaborador_id == Colaborador.id)
+            .outerjoin(Participacion, Colaborador.id == Participacion.colaborador_id)
+            .filter(
+                ValorDemografico.categoria_id == categoria.id,
+                Colaborador.empresa_id == empresa_id
+            )
+            .group_by(ValorDemografico.valor)
+            .all()
         )
 
-    # Autoajustar ancho de columnas
-    for col in ws.columns:
-      max_len = max(len(str(cell.value or '')) for cell in col)
-      col_letter = openpyxl.utils.get_column_letter(col[0].column)
-      ws.column_dimensions[col_letter].width = max(max_len + 5, 18)
+        for fila in query_resultados:
+            b2 = float(fila.total)
+            c2 = float(fila.contestaron)
 
-  db.close()
+            if 0 < c2 < 5:
+                row_data = [fila.valor, int(b2), '-', '-', '-']
+            else:
+                pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
+                margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
+                margen_str = f'{margen}%' if margen != '-' else '-'
+                pct_str = f'{pct}%'
+                row_data = [fila.valor, int(b2), int(c2), pct_str, margen_str]
 
-  output = io.BytesIO()
-  wb.save(output)
-  output.seek(0)
-  return output
+            ws.append(row_data)
+
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=5):
+            for idx, cell in enumerate(row):
+                cell.font = font_datos
+                cell.border = borde_celda
+                cell.alignment = alineacion_centro if idx > 0 else alineacion_izquierda
+
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = openpyxl.utils.get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 5, 18)
+
+    db.close()
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
 
 
 from email.mime.application import MIMEApplication
@@ -1048,34 +1015,43 @@ def enviar_reporte_email():
         jsonify({'error': f'Falló el envío por correo electrónico: {str(e)}'}),
         500,
     )
+
+# Asegúrate de incluir send_file en tus imports de flask al inicio:
+# from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+
 @app.route('/admin/descargar-reporte-excel', methods=['POST'])
 def descargar_reporte_excel():
     if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
         return jsonify({'error': 'No autorizado'}), 401
 
-    data = request.get_json()
-    empresa_id = data.get('empresa_id')
-    categorias_ids = data.get('categorias_ids', [])
+    try:
+        data = request.get_json() or {}
+        empresa_id_raw = data.get('empresa_id')
+        categorias_ids = data.get('categorias_ids', [])
 
-    if not empresa_id or not categorias_ids:
-        return jsonify({'error': 'Debe seleccionar al menos una demografía.'}), 400
+        if not empresa_id_raw or not categorias_ids:
+            return jsonify({'error': 'Debe seleccionar la organización y al menos una demografía.'}), 400
 
-    db = SessionLocal()
-    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
-    nombre_empresa = empresa.nombre if empresa else 'Organizacion'
-    db.close()
+        empresa_id = int(empresa_id_raw)
+        db = SessionLocal()
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+        nombre_empresa = empresa.nombre if empresa else 'Organizacion'
+        db.close()
 
-    excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
-    nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
+        # Generar el stream binario del Excel
+        excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
+        nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
 
-    from flask import send_file
-    return send_file(
-        excel_stream,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True,
-        download_name=nombre_archivo
-    )
-
+        from flask import send_file
+        return send_file(
+            excel_stream,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=nombre_archivo
+        )
+    except Exception as e:
+        print(f"❌ Error crítico al generar Excel: {str(e)}")
+        return jsonify({'error': f'Falló la generación del archivo Excel: {str(e)}'}), 500
 print("5. Intentando encender el servidor Flask en el entorno de Render...")
 
 if __name__ == '__main__':
