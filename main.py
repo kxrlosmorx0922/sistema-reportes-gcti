@@ -473,7 +473,7 @@ def conmutar_estado(empresa_id):
     return redirect('/admin')
 
 # =================================================================
-# 📥 PASO 2: CARGAR BASE DE COLABORADORES (LEE COLUMNA C PARA EMAIL)
+# 📥 PASO 2: CARGAR BASE DE COLABORADORES (CORREGIDO Y GARANTIZADO)
 # =================================================================
 @app.route('/admin/cargar-colaboradores', methods=['POST'])
 def cargar_colaboradores():
@@ -492,6 +492,7 @@ def cargar_colaboradores():
         empresa_id = int(empresa_id_raw)
         nombre_archivo = archivo.filename.lower()
         
+        # 1. Lectura del archivo (Excel o CSV)
         if nombre_archivo.endswith('.csv'):
             try:
                 df = pd.read_csv(archivo, encoding='utf-8')
@@ -508,6 +509,7 @@ def cargar_colaboradores():
         col_nombre_name = columnas_originales[1] if len(columnas_originales) > 1 else columnas_originales[0]
         col_email_name = columnas_originales[2] if len(columnas_originales) > 2 else columnas_originales[0]
         
+        # Segmentos demográficos (Columna D en adelante)
         columnas_fijas = {col_id_name, col_nombre_name, col_email_name}
         columnas_demograficas = [
             c for c in columnas_originales 
@@ -517,6 +519,7 @@ def cargar_colaboradores():
             and 'tipo de comunicado' not in c.lower().replace('ó', 'o').replace('á', 'a')
         ]
 
+        # Limpieza de datos antiguos para esta empresa
         colab_ids = [c[0] for c in db.query(Colaborador.id).filter(Colaborador.empresa_id == empresa_id).all()]
         if colab_ids:
             db.query(ValorDemografico).filter(ValorDemografico.colaborador_id.in_(colab_ids)).delete(synchronize_session=False)
@@ -526,6 +529,7 @@ def cargar_colaboradores():
         db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).delete(synchronize_session=False)
         db.commit()
 
+        # Insertar Categorías Demográficas
         categorias_dicts = [{'nombre': col_demog, 'empresa_id': empresa_id} for col_demog in columnas_demograficas]
         db.bulk_insert_mappings(CategoriaDemografica, categorias_dicts)
         db.commit()
@@ -533,6 +537,7 @@ def cargar_colaboradores():
         cats_db = db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).all()
         mapa_categorias = {cat.nombre: cat.id for cat in cats_db}
 
+        # Insertar Colaboradores
         colaboradores_dicts = []
         for index, fila in df.iterrows():
             id_raw = fila[col_id_name]
@@ -555,16 +560,18 @@ def cargar_colaboradores():
         db.bulk_insert_mappings(Colaborador, colaboradores_dicts)
         db.commit()
 
-        colabs_db = db.query(Colaborador.id, Colaborador.identificacion).filter(Colaborador.empresa_id == empresa_id).all()
-        mapa_colaboradores = {c.identificacion: c.id for c in colabs_db}
+        # ✅ CRUCIAL: Mapear colaboradores recién creados POR EMAIL (para evitar fallos por ID)
+        colabs_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id).all()
+        mapa_colaboradores_by_email = {c.email.strip().lower(): c.id for c in colabs_db if c.email}
         
         valores_dicts = []
         for index, fila in df.iterrows():
-            id_raw = fila[col_id_name]
-            if id_raw is None:
+            email_raw = fila[col_email_name]
+            if email_raw is None:
                 continue
-            identificacion = str(id_raw).strip().split('.')[0]
-            colab_id = mapa_colaboradores.get(identificacion)
+            email_val = str(email_raw).strip().lower()
+            colab_id = mapa_colaboradores_by_email.get(email_val)
+            
             if not colab_id:
                 continue
                 
@@ -582,10 +589,11 @@ def cargar_colaboradores():
         db.bulk_insert_mappings(ValorDemografico, valores_dicts)
         db.commit()
 
-        flash(f"👥 Censo cargado exitosamente. Se registraron {len(colaboradores_dicts)} colaboradores con sus segmentos demográficos.", "success")
+        flash(f"👥 Censo cargado exitosamente. Se registraron {len(colaboradores_dicts)} colaboradores y {len(valores_dicts)} valores demográficos.", "success")
         
     except Exception as e:
         db.rollback()
+        print(f"❌ Error al cargar colaboradores: {e}")
         flash(f"Error al procesar la base de colaboradores: {str(e)}", "danger")
     finally:
         db.close()
