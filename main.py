@@ -187,7 +187,7 @@ def enviar_correo_notificacion(destinatario, nombre_titular, usuario_login, pass
 # CONFIGURACIÓN E INICIALIZACIÓN DE LA BASE DE DATOS
 # =================================================================
 try:
-    DATABASE_URL = "postgresql://neondb_owner:npg_ptfDH6Ze5uLW@ep-young-waterfall-ahb1kj3y-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    DATABASE_URL = "postgresql://neondb_owner:npg_DvFw5XoZ9Yuh@ep-fancy-feather-aws87y8x-pooler.c-12.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
     
     engine = create_engine(
         DATABASE_URL,
@@ -350,56 +350,65 @@ def cambiar_mi_password():
 
 @app.route('/admin/crear-empresa', methods=['POST'])
 def crear_empresa():
-    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: return redirect('/login')
-    nombre_emp = request.form.get('nombre_empresa').strip()
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']: 
+        return redirect('/login')
+        
+    nombre_emp = request.form.get('nombre_empresa', '').strip()
     fecha_ini = request.form.get('fecha_inicio', '').strip()
     fecha_cie = request.form.get('fecha_cierre', '').strip()
-    nombre_cli = request.form.get('nombre_cliente', '').strip()
-    correo_cli = request.form.get('correo_cliente', '').strip().lower()
     correo_coor = request.form.get('correo_coordinador', '').strip().lower()
     
-    if nombre_emp and nombre_cli and correo_cli and correo_coor:
+    # Opcionales (por si no vienen en el formulario)
+    nombre_cli = request.form.get('nombre_cliente', '').strip() or nombre_emp
+    correo_cli = request.form.get('correo_cliente', '').strip().lower() or correo_coor
+    
+    # Validar solo los campos obligatorios actuales
+    if nombre_emp and correo_coor:
         db = SessionLocal()
-        if not db.query(Empresa).filter(Empresa.nombre == nombre_emp).first():
-            nueva_empresa = Empresa(nombre=nombre_emp)
-            db.add(nueva_empresa)
-            db.flush()
-            
-            event_id = '-'
-            if fecha_ini and fecha_cie:
-                try:
-                    event_id = crear_evento_google_calendar(nombre_emp, fecha_ini, fecha_cie, correo_coor) or '-'
-                except Exception as e:
-                    print(f"❌ Alerta: Google Calendar no respondió en Render (Omitido): {e}")
-                    event_id = '-'
-            
-            tabla_real = Empresa.__table__.name
-            db.execute(text(f"UPDATE {tabla_real} SET fecha_inicio=:ini, fecha_cierre=:cie, cerrada=0, nombre_cliente=:n_cli, correo_cliente=:c_cli, correo_coordinador=:c_coor, calendar_event_id=:ev_id WHERE id=:id"),
-                    {"ini": fecha_ini, "cie": fecha_cie, "n_cli": nombre_cli, "c_cli": correo_cli, "c_coor": correo_coor, "ev_id": event_id, "id": nueva_empresa.id})
-            
-            email_cliente = generar_username_cliente(nombre_cli)
-            password_cliente = generar_password_aleatorio()
-            
-            if db.query(Usuario).filter(Usuario.email == email_cliente).first():
-                email_cliente = f"{email_cliente[:-2]}{nueva_empresa.id:02d}"
+        try:
+            if not db.query(Empresa).filter(Empresa.nombre == nombre_emp).first():
+                nueva_empresa = Empresa(nombre=nombre_emp)
+                db.add(nueva_empresa)
+                db.flush()
                 
-            nuevo_u = Usuario(email=email_cliente, password_hash=password_cliente, rol='cliente', empresa_id=nueva_empresa.id)
-            db.add(nuevo_u)
-            db.flush()
-            
-            tabla_usuario = Usuario.__table__.name
-            db.execute(text(f"UPDATE {tabla_usuario} SET nombre = :nom WHERE id = :id"), {"nom": nombre_cli, "id": nuevo_u.id})
-            db.commit()
-            
-            try:
-                enviar_correo_notificacion(correo_cli, nombre_cli, email_cliente, password_cliente, es_olvido=False)
-            except Exception as e:
-                print(f"❌ Alerta: El correo de Gmail no se envió por seguridad de Render (Omitido): {e}")
+                event_id = '-'
+                if fecha_ini and fecha_cie:
+                    try:
+                        event_id = crear_evento_google_calendar(nombre_emp, fecha_ini, fecha_cie, correo_coor) or '-'
+                    except Exception as e:
+                        print(f"❌ Alerta Calendar: {e}")
+                        event_id = '-'
                 
-            flash(f"🏢 ¡Organización registrada con éxito! Cuenta: {email_cliente}", "success")
-        else:
-            flash("⚠️ Esa Organización ya se encuentra registrada.", "danger")
-        db.close()
+                tabla_real = Empresa.__table__.name
+                db.execute(text(f"UPDATE {tabla_real} SET fecha_inicio=:ini, fecha_cierre=:cie, cerrada=0, nombre_cliente=:n_cli, correo_cliente=:c_cli, correo_coordinador=:c_coor, calendar_event_id=:ev_id WHERE id=:id"),
+                        {"ini": fecha_ini, "cie": fecha_cie, "n_cli": nombre_cli, "c_cli": correo_cli, "c_coor": correo_coor, "ev_id": event_id, "id": nueva_empresa.id})
+                
+                # Crear usuario asociado
+                email_cliente = generar_username_cliente(nombre_cli)
+                password_cliente = generar_password_aleatorio()
+                
+                if db.query(Usuario).filter(Usuario.email == email_cliente).first():
+                    email_cliente = f"{email_cliente[:-2]}{nueva_empresa.id:02d}"
+                    
+                nuevo_u = Usuario(email=email_cliente, password_hash=password_cliente, rol='cliente', empresa_id=nueva_empresa.id)
+                db.add(nuevo_u)
+                db.flush()
+                
+                tabla_usuario = Usuario.__table__.name
+                db.execute(text(f"UPDATE {tabla_usuario} SET nombre = :nom WHERE id = :id"), {"nom": nombre_cli, "id": nuevo_u.id})
+                db.commit()
+                
+                flash(f"🏢 ¡Organización '{nombre_emp}' creada con éxito! Cuenta asignada: {email_cliente}", "success")
+            else:
+                flash("⚠️ Esa Organización ya se encuentra registrada.", "danger")
+        except Exception as e:
+            db.rollback()
+            flash(f"❌ Error al guardar en base de datos: {str(e)}", "danger")
+        finally:
+            db.close()
+    else:
+        flash("⚠️ Por favor completa el Nombre de la Organización y el Correo del Coordinador.", "warning")
+        
     return redirect('/admin')
 
 @app.route('/admin/editar-empresa/<int:empresa_id>', methods=['POST'])
@@ -649,24 +658,37 @@ def cargar_participacion():
 @app.route('/restablecer-password', methods=['POST'])
 def restablecer_password():
     identificador = request.form.get('identificador', '').strip().lower()
-    if not identificador: return redirect('/login')
+    if not identificador: 
+        return redirect('/login')
+        
     db = SessionLocal()
     tabla_real = Empresa.__table__.name
     usuario, empresa_asoc = None, None
-    emp_res = db.execute(text(f"SELECT id, nombre, nombre_cliente, correo_cliente FROM {tabla_real} WHERE LOWER(correo_cliente) = :ident"), {"ident": identificador}).fetchone()
-    if emp_res:
-        empresa_asoc = emp_res
-        usuario = db.query(Usuario).filter(Usuario.empresa_id == emp_res[0], Usuario.rol == 'cliente').first()
-    else:
-        usuario = db.query(Usuario).filter(Usuario.email == identificador).first()
-        if usuario and usuario.empresa_id:
-            empresa_asoc = db.execute(text(f"SELECT id, nombre, nombre_cliente, correo_cliente FROM {tabla_real} WHERE id = :id"), {"id": usuario.empresa_id}).fetchone()
-    if usuario and empresa_asoc:
+    
+    # 1. Buscar en usuarios
+    usuario = db.query(Usuario).filter(Usuario.email == identificador).first()
+    if usuario and usuario.empresa_id:
+        emp_res = db.execute(text(f"SELECT id, nombre, nombre_cliente, correo_cliente, correo_coordinador FROM {tabla_real} WHERE id = :id"), {"id": usuario.empresa_id}).fetchone()
+        if emp_res:
+            empresa_asoc = emp_res
+            
+    if usuario:
         nueva_clave = generar_password_aleatorio()
         usuario.password_hash = nueva_clave
         db.commit()
-        enviar_correo_notificacion(empresa_asoc[3], empresa_asoc[2], usuario.email, nueva_clave, es_olvido=True)
-        flash("🔑 Nueva contraseña enviada al correo.", "success")
+        
+        destinatario = (empresa_asoc[3] if empresa_asoc and empresa_asoc[3] else None) or (empresa_asoc[4] if empresa_asoc and len(empresa_asoc) > 4 else usuario.email)
+        nombre_dest = (empresa_asoc[2] if empresa_asoc and empresa_asoc[2] else None) or (empresa_asoc[1] if empresa_asoc else 'Usuario')
+        
+        try:
+            enviar_correo_notificacion(destinatario, nombre_dest, usuario.email, nueva_clave, es_olvido=True)
+        except Exception as e:
+            print(f"❌ Error al enviar mail de clave: {e}")
+            
+        flash("🔑 Nueva contraseña generada y notificada.", "success")
+    else:
+        flash("⚠️ No se encontró ningún usuario con esa identificación/correo.", "danger")
+        
     db.close()
     return redirect('/login')
 
