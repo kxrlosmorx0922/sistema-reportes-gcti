@@ -869,21 +869,20 @@ def progreso_global():
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     db = SessionLocal()
     
-    # 1. Cargar la plantilla que YA TIENE el logo de GCTI pré-insertado
+    # Cargar la plantilla pre-diseñada que YA TIENE el logo en E1
     path_plantilla = os.path.join(app.root_path, 'static', 'plantilla_reporte.xlsx')
     
     if os.path.exists(path_plantilla):
         wb = openpyxl.load_workbook(path_plantilla)
         ws_base = wb.active
     else:
-        # Respaldo si no encuentra el archivo
         wb = openpyxl.Workbook()
         ws_base = wb.active
 
     empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
-    nombre_empresa = empresa.nombre if empresa else 'Organización'
+    nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
 
-    # Fecha actual y título exacto para A1:D3
+    # Texto en dos líneas para la celda A1 (A1:D3 combinadas en la plantilla)
     meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     hoy = datetime.now()
     fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
@@ -901,7 +900,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     borde_fino = Side(border_style='thin', color='D9D9D9')
     borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-    # Normalizar IDs
+    # Normalizar IDs de categorías
     ids_limpios = []
     for cid in categorias_ids_seleccionadas:
         try:
@@ -936,18 +935,17 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
         nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
         
-        # Copiar hoja plantilla con el logo intacto
+        # Duplicar la hoja respetando el diseño y el logo de la plantilla
         ws = wb.copy_worksheet(ws_base)
         ws.title = nombre_hoja
-
         ws.views.sheetView[0].showGridLines = False
 
-        # Escribir únicamente el título en A1
+        # Solo actualizar el texto del título en A1
         ws['A1'].value = titulo_encabezado
         ws['A1'].font = Font(name='Century Gothic', size=11, bold=True, color='000000')
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-        # Fila 5: Encabezados
+        # Fila 5: Encabezados de Tabla (Barra Negra)
         ws.row_dimensions[5].height = 24
         headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
 
@@ -957,7 +955,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             cell.font = font_encabezado
             cell.alignment = alineacion_centro if col_idx > 1 else alineacion_izquierda
 
-        # Cargar datos
+        # Cargar datos demográficos
         valores_por_colab = {}
         cats_ids_grupo = [s['id'] for s in lista_subcats]
         
@@ -971,7 +969,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                     valores_por_colab[rv.colaborador_id] = {}
                 valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
 
-        # Árbol Jerárquico desde Fila 6
+        # Cargar filas de la tabla desde la Fila 6
         def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
             if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
                 return
@@ -1024,6 +1022,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
         procesar_nivel_recursivo(colab_ids_list, 0)
 
+    # Remover la pestaña molde si se crearon pestañas de datos
     if len(wb.sheetnames) > 1:
         wb.remove(ws_base)
 
@@ -1033,6 +1032,43 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     wb.save(output)
     output.seek(0)
     return output
+
+
+@app.route('/admin/descargar-reporte-excel', methods=['POST'])
+def descargar_reporte_excel():
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
+        return jsonify({'error': 'No autorizado'}), 401
+
+    try:
+        data = request.get_json() or {}
+        empresa_id_raw = data.get('empresa_id')
+        categorias_ids = data.get('categorias_ids', [])
+
+        if not empresa_id_raw or not categorias_ids:
+            return jsonify({'error': 'Debe seleccionar la organización y al menos una demografía.'}), 400
+
+        empresa_id = int(empresa_id_raw)
+        db = SessionLocal()
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+        nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
+        db.close()
+
+        # Nombre de archivo formateado
+        hoy_str = datetime.now().strftime("%d_%m_%Y")
+        nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participación {hoy_str}.xlsx"
+
+        excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
+        excel_stream.seek(0)
+
+        return send_file(
+            excel_stream,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=nombre_archivo
+        )
+    except Exception as e:
+        print(f"❌ Error crítico al generar Excel: {str(e)}")
+        return jsonify({'error': f'Falló la generación del archivo Excel: {str(e)}'}), 500
     
 @app.route('/admin/descargar-reporte-excel', methods=['POST'])
 def descargar_reporte_excel():
