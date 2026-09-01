@@ -14,9 +14,6 @@
         }
         .contenedor-dashboard { display: flex; min-height: 100vh; width: 100%; }
         
-        /* ==========================================================================
-           BARRA LATERAL - ESTANDARIZADA PREMIUM 
-           ========================================================================== */
         .barra-lateral {
             background-color: #1e2229;
             width: 280px;
@@ -82,9 +79,6 @@
             list-style: none;
         }
 
-        /* ==========================================================================
-           CUERPO PRINCIPAL Y COMPONENTES
-           ========================================================================== */
         .contenido-principal { flex-grow: 1; padding: 3rem; }
         .contenido-principal h2 { font-size: 1.8rem; font-weight: 700; color: #2c3e50; margin-bottom: 0.3rem; }
         .contenido-principal .subtitulo { color: #7f8c8d; margin-bottom: 2.5rem; font-size: 1rem; }
@@ -219,7 +213,7 @@
             padding: 2.25rem;
             border-radius: 10px;
             width: 100%;
-            max-width: 500px;
+            max-width: 520px;
             box-shadow: 0 8px 30px rgba(0,0,0,0.18);
         }
         .modal-titulo-seccion {
@@ -463,6 +457,7 @@
     </div>
 </div>
 
+<!-- MODAL MODIFICAR ORGANIZACIÓN (CON MÓDULO DE LOGO INTEGRAD0) -->
 <div id="modal-edicion-container" class="modal-overlay">
     <div class="modal-contenido">
         <div class="modal-titulo-seccion">
@@ -507,6 +502,27 @@
                 <button type="submit" class="btn btn-azul" style="width:auto; padding:0.55rem 1.2rem;">Guardar Cambios</button>
             </div>
         </form>
+
+        <!-- FORMULARIO SECUNDARIO PARA SUBIR O ACTUALIZAR EL LOGO INSTITUCIONAL -->
+        <form action="/admin/cargar-logo-empresa" method="POST" enctype="multipart/form-data" style="margin-top: 1.5rem; padding-top: 1.2rem; border-top: 1px dashed #cbd5e1;">
+            <input type="hidden" id="edit_empresa_id_logo" name="empresa_id" value="">
+            
+            <label style="display: block; font-size: 0.85rem; font-weight: 700; color: #1e293b; margin-bottom: 0.5rem;">
+                🖼️ Logo Institucional de la Organización (JPG o PNG):
+            </label>
+            
+            <div style="display: flex; gap: 0.8rem; align-items: center;">
+                <input type="file" name="logo_cliente" accept="image/png, image/jpeg, image/jpg" required style="font-size: 0.85rem; color: #475569; width: 100%;">
+                
+                <button type="submit" style="background-color: #2563eb; color: white; border: none; padding: 0.55rem 1.2rem; border-radius: 6px; font-size: 0.85rem; font-weight: 700; cursor: pointer; white-space: nowrap;">
+                    Subir Logo
+                </button>
+            </div>
+            
+            <span style="display: block; font-size: 0.75rem; color: #64748b; margin-top: 0.4rem;">
+                Recomendado: Fondo transparente PNG, proporción horizontal.
+            </span>
+        </form>
     </div>
 </div>
 
@@ -536,6 +552,7 @@ function desplegarModalEdicion(id, nombre, fechaInicio, fechaCierre, nombreClien
     const formulario = document.getElementById('formulario-edicion-maestro');
     formulario.action = `/admin/editar-empresa/${id}`;
     
+    document.getElementById('edit_empresa_id_logo').value = id;
     document.getElementById('edit_nombre_empresa').value = nombre;
     document.getElementById('edit_nombre_cliente').value = (nombreCliente === 'None' || nombreCliente === '-') ? '' : nombreCliente;
     document.getElementById('edit_correo_cliente').value = (correoCliente === 'None' || correoCliente === '-') ? '' : correoCliente;
