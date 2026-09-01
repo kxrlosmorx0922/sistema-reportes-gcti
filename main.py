@@ -642,6 +642,7 @@ def cargar_colaboradores():
         db.close()
         
     return redirect('/admin')
+
 # =================================================================
 # 📊 PASO 3: CARGAR PARTICIPACIÓN (LEE COLUMNA A)
 # =================================================================
@@ -869,7 +870,7 @@ def progreso_global():
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     db = SessionLocal()
     
-    # Cargar la plantilla pre-diseñada que YA TIENE el logo en E1
+    # Cargar la plantilla pre-diseñada que YA TIENE el logo de GCTI en E1
     path_plantilla = os.path.join(app.root_path, 'static', 'plantilla_reporte.xlsx')
     
     if os.path.exists(path_plantilla):
@@ -1033,7 +1034,6 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     output.seek(0)
     return output
 
-
 @app.route('/admin/descargar-reporte-excel', methods=['POST'])
 def descargar_reporte_excel():
     if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
@@ -1053,45 +1053,12 @@ def descargar_reporte_excel():
         nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
         db.close()
 
-        # Nombre de archivo formateado
+        # Nombre de archivo dinámico
         hoy_str = datetime.now().strftime("%d_%m_%Y")
         nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participación {hoy_str}.xlsx"
 
         excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
         excel_stream.seek(0)
-
-        return send_file(
-            excel_stream,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=nombre_archivo
-        )
-    except Exception as e:
-        print(f"❌ Error crítico al generar Excel: {str(e)}")
-        return jsonify({'error': f'Falló la generación del archivo Excel: {str(e)}'}), 500
-    
-@app.route('/admin/descargar-reporte-excel', methods=['POST'])
-def descargar_reporte_excel():
-    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
-        return jsonify({'error': 'No autorizado'}), 401
-
-    try:
-        data = request.get_json() or {}
-        empresa_id_raw = data.get('empresa_id')
-        categorias_ids = data.get('categorias_ids', [])
-
-        if not empresa_id_raw or not categorias_ids:
-            return jsonify({'error': 'Debe seleccionar la organización y al menos una demografía.'}), 400
-
-        empresa_id = int(empresa_id_raw)
-        db = SessionLocal()
-        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
-        nombre_empresa = empresa.nombre if empresa else 'Organizacion'
-        db.close()
-
-        excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
-        excel_stream.seek(0)
-        nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
 
         return send_file(
             excel_stream,
@@ -1116,12 +1083,16 @@ def enviar_reporte_email():
         return jsonify({'error': 'Debe seleccionar al menos una demografía.'}), 400
 
     db = SessionLocal()
-    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
-    nombre_empresa = empresa.nombre if empresa else 'Organización'
+    empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
+    nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
     db.close()
 
     excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
     excel_stream.seek(0)
+
+    # Nombre de archivo dinámico para el correo
+    hoy_str = datetime.now().strftime("%d_%m_%Y")
+    nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participación {hoy_str}.xlsx"
 
     remitente_autenticado = 'carlos.mora@peoplesvoice.co'
     nombre_remitente = session.get('nombre', 'Portal GCTI®')
@@ -1157,12 +1128,10 @@ def enviar_reporte_email():
         excel_stream.read(),
         _subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
-    nombre_archivo = f"Reporte_GCTI_{nombre_empresa.replace(' ', '_')}.xlsx"
     parte_adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_archivo)
     msg.attach(parte_adjunto)
 
     try:
-        # CAMBIO CLAVE: Usar SMTP_SSL en puerto 465 (sin bloqueo de red en Render)
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(remitente_autenticado, 'hxhjkhqleflgvmoo')
         recipients = [destinatario_principal, copia_cc]
@@ -1172,7 +1141,7 @@ def enviar_reporte_email():
     except Exception as e:
         print(f"❌ Error SMTP: {str(e)}")
         return jsonify({'error': f'Falló el envío por correo electrónico: {str(e)}'}), 500
-        
+
 print("5. Intentando encender el servidor Flask en el entorno de Render...")
 
 if __name__ == '__main__':
