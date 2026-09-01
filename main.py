@@ -1067,19 +1067,28 @@ def descargar_reporte_excel():
         nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
         db.close()
 
-        # Nomenclatura oficial requerida
+        # 1. Generar la fecha actual con formato dd_mm_yyyy
         hoy_str = datetime.now().strftime("%d_%m_%Y")
+        
+        # 2. Armar el nombre de archivo personalizado requerido
         nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participación {hoy_str}.xlsx"
 
+        # 3. Generar el flujo del Excel
         excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
         excel_stream.seek(0)
 
-        return send_file(
+        # 4. Retornar la respuesta forzando el header Content-Disposition con download_name
+        response = send_file(
             excel_stream,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
             download_name=nombre_archivo
         )
+        
+        # Header explícito por compatibilidad de navegadores
+        response.headers["Content-Disposition"] = f'attachment; filename="{nombre_archivo}"'
+        return response
+
     except Exception as e:
         print(f"❌ Error crítico al generar Excel: {str(e)}")
         return jsonify({'error': f'Falló la generación del archivo Excel: {str(e)}'}), 500
