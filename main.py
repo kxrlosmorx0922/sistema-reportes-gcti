@@ -893,15 +893,16 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         }
 
         fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
-        font_encabezado = Font(name='Century Gothic', size=11, bold=True, color='FFFFFF')
+        font_encabezado = Font(name='Century Gothic', size=10, bold=True, color='FFFFFF')
         alineacion_centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
         alineacion_izquierda = Alignment(horizontal='left', vertical='center')
+        
         borde_fino = Side(border_style='thin', color='D9D9D9')
         borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
         path_logo_gcti = os.path.join(app.root_path, 'static', 'logo_gcti.png')
 
-        # Normalizar IDs de categorías a enteros
+        # Normalizar IDs
         ids_limpios = []
         for cid in categorias_ids_seleccionadas:
             try:
@@ -909,7 +910,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             except (ValueError, TypeError):
                 continue
 
-        # Agrupar categorías por su raíz
+        # Agrupar categorías
         grupos_categorias = {}
         for cat_id_int in ids_limpios:
             cat_obj = db.query(CategoriaDemografica).filter(
@@ -938,52 +939,67 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
             ws = wb.create_sheet(title=nombre_hoja)
 
-            ws.row_dimensions[1].height = 25
-            ws.row_dimensions[2].height = 25
-            ws.row_dimensions[3].height = 25
+            # 1. OCULTAR GRIDLINES DEL RESTO DE LA HOJA
+            ws.views.sheetView[0].showGridLines = False
 
+            # 2. DEFINIR ANCHOS DE COLUMNA EXACTOS (A=80, RESTO=25)
+            ws.column_dimensions['A'].width = 80
+            ws.column_dimensions['B'].width = 25
+            ws.column_dimensions['C'].width = 25
+            ws.column_dimensions['D'].width = 25
+            ws.column_dimensions['E'].width = 25
+
+            # 3. ALTURA DE FILAS DE CABECERA
+            ws.row_dimensions[1].height = 20
+            ws.row_dimensions[2].height = 20
+            ws.row_dimensions[3].height = 20
+            ws.row_dimensions[4].height = 12  # Espacio en blanco
+
+            # 4. COMBINAR Y INSERTAR LOGOS (A1:A3 Y E1:E3)
+            ws.merge_cells('A1:A3')
+            ws.merge_cells('E1:E3')
             ws.merge_cells('B1:D3')
+
+            # Título principal en B1:D3
             cell_title = ws['B1']
             cell_title.value = titulo_encabezado
             cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
             cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-            # Inserción segura de Logo Cliente
+            # Logo Cliente en A1:A3
             if logo_cliente_url:
                 try:
                     clean_path = logo_cliente_url.lstrip('/')
                     path_full_cliente = os.path.normpath(os.path.join(app.root_path, clean_path))
                     if os.path.exists(path_full_cliente):
                         img_cliente = openpyxl_image.Image(path_full_cliente)
-                        img_cliente.width = 100
-                        img_cliente.height = 50
+                        img_cliente.width = 110
+                        img_cliente.height = 55
                         ws.add_image(img_cliente, 'A1')
                 except Exception as e:
                     print(f"⚠️ Alerta Logo Cliente: {e}")
 
-            # Inserción segura de Logo GCTI
+            # Logo GCTI en E1:E3
             if os.path.exists(path_logo_gcti):
                 try:
                     img_gcti = openpyxl_image.Image(path_logo_gcti)
-                    img_gcti.width = 100
-                    img_gcti.height = 50
+                    img_gcti.width = 110
+                    img_gcti.height = 55
                     ws.add_image(img_gcti, 'E1')
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            ws.row_dimensions[4].height = 10
-            ws.row_dimensions[5].height = 22
-
+            # 5. FILA 5: ENCABEZADOS DE TABLA (FRANJA NEGRA)
+            ws.row_dimensions[5].height = 24
             headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
-            ws.append([])  # Fila 4 libre
-            ws.append(headers)  # Fila 5
 
-            for col_num in range(1, 6):
-                cell = ws.cell(row=5, column=col_num)
+            for col_idx, text_header in enumerate(headers, 1):
+                cell = ws.cell(row=5, column=col_idx, value=text_header)
                 cell.fill = fill_encabezado
                 cell.font = font_encabezado
-                cell.alignment = alineacion_centro if col_num > 1 else alineacion_izquierda
+                cell.alignment = alineacion_centro if col_idx > 1 else alineacion_izquierda
 
+            # Cargar datos demográficos
             valores_por_colab = {}
             cats_ids_grupo = [s['id'] for s in lista_subcats]
             
@@ -997,6 +1013,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                         valores_por_colab[rv.colaborador_id] = {}
                     valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
 
+            # 6. FILAS 6+: DATOS DE LA TABLA CON BORDES GRISES Y SANGRÍA
             def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
                 if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
                     return
@@ -1029,6 +1046,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
                     ws.append(row_data)
                     row_idx = ws.max_row
+                    ws.row_dimensions[row_idx].height = 20
 
                     color_hex = COLORES_NIVELES.get(nivel_curr, '000000')
                     font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_curr <= 3), color=color_hex)
@@ -1036,7 +1054,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
                     for col_idx in range(1, 6):
                         cell = ws.cell(row=row_idx, column=col_idx)
-                        cell.border = borde_celda
+                        cell.border = borde_celda  # Aplicar borde gris
                         if col_idx == 1:
                             cell.font = font_nivel
                             cell.alignment = alineacion_sangria
@@ -1047,11 +1065,6 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                     procesar_nivel_recursivo(ids_hijos, subcat_idx + 1)
 
             procesar_nivel_recursivo(colab_ids_list, 0)
-
-            for col in ws.columns:
-                max_len = max(len(str(cell.value or '')) for cell in col)
-                col_letter = openpyxl.utils.get_column_letter(col[0].column)
-                ws.column_dimensions[col_letter].width = max(max_len + 8, 22)
 
     finally:
         db.close()
