@@ -867,173 +867,185 @@ def progreso_global():
         db.close()
 
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
     db = SessionLocal()
     
-    # 1. Cargar la plantilla pre-diseñada desde la carpeta static
-    path_plantilla = os.path.join(app.root_path, 'static', 'plantilla_reporte.xlsx')
-    
-    if os.path.exists(path_plantilla):
-        wb = openpyxl.load_workbook(path_plantilla)
-        ws_base = wb.active
-    else:
-        wb = openpyxl.Workbook()
-        ws_base = wb.active
-        ws_base.title = "Plantilla"
+    try:
+        empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
+        nombre_empresa = empresa.nombre if empresa else 'Organización'
 
-    empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
-    nombre_empresa = empresa.nombre if empresa else 'Organización'
+        # Fecha actual formateada y título unificado en A1:D3
+        meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+        hoy = datetime.now()
+        fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
+        titulo_encabezado = f"Great Culture to Innovate México - Reporte de Participación {fecha_formateada}\n{nombre_empresa}"
 
-    # Fecha actual formateada y título en dos líneas (con salto de línea \n)
-    meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    hoy = datetime.now()
-    fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
-    titulo_encabezado = f"Great Culture to Innovate México - Reporte de Participación {fecha_formateada}\n{nombre_empresa}"
+        COLORES_NIVELES = {
+            1: 'C00000', 2: '0000FF', 3: '70AD47', 4: 'C65911', 5: '7030A0', 6: 'A6A6A6', 7: '000000'
+        }
 
-    COLORES_NIVELES = {
-        1: 'C00000', 2: '0000FF', 3: '70AD47', 4: 'C65911', 5: '7030A0', 6: 'A6A6A6', 7: '000000'
-    }
-
-    fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
-    font_encabezado = Font(name='Century Gothic', size=10, bold=True, color='FFFFFF')
-    alineacion_centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    alineacion_izquierda = Alignment(horizontal='left', vertical='center')
-    
-    borde_fino = Side(border_style='thin', color='D9D9D9')
-    borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
-
-    # Normalizar IDs de categorías seleccionadas
-    ids_limpios = []
-    for cid in categorias_ids_seleccionadas:
-        try:
-            ids_limpios.append(int(cid))
-        except (ValueError, TypeError):
-            continue
-
-    grupos_categorias = {}
-    for cat_id_int in ids_limpios:
-        cat_obj = db.query(CategoriaDemografica).filter(
-            CategoriaDemografica.id == cat_id_int,
-            CategoriaDemografica.empresa_id == int(empresa_id)
-        ).first()
-
-        if not cat_obj:
-            continue
-
-        nombre_base = re.sub(r'\s+\d+$', '', cat_obj.nombre).strip()
-        match_nivel = re.search(r'(\d+)$', cat_obj.nombre)
-        nivel_num = int(match_nivel.group(1)) if match_nivel else 1
-
-        if nombre_base not in grupos_categorias:
-            grupos_categorias[nombre_base] = []
-
-        grupos_categorias[nombre_base].append({'id': cat_obj.id, 'nombre_original': cat_obj.nombre, 'nivel': nivel_num})
-
-    colabs_db = db.query(Colaborador.id).filter(Colaborador.empresa_id == int(empresa_id)).all()
-    colab_ids_list = [c[0] for c in colabs_db]
-    participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
-
-    for nombre_grupo, lista_subcats in grupos_categorias.items():
-        lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
-        nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
+        fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
+        font_encabezado = Font(name='Century Gothic', size=10, bold=True, color='FFFFFF')
+        alineacion_centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        alineacion_izquierda = Alignment(horizontal='left', vertical='center')
         
-        # Duplicar hoja conservando estilos e imagen nativa Place in Cell
-        ws = wb.copy_worksheet(ws_base)
-        ws.title = nombre_hoja
+        borde_fino = Side(border_style='thin', color='D9D9D9')
+        borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-        # Configuración visual
-        ws.views.sheetView[0].showGridLines = False
-        ws.column_dimensions['A'].width = 80
-        ws.column_dimensions['B'].width = 25
-        ws.column_dimensions['C'].width = 25
-        ws.column_dimensions['D'].width = 25
-        ws.column_dimensions['E'].width = 25
+        path_logo_gcti = os.path.join(app.root_path, 'static', 'logo_gcti.png')
 
-        # Escribir título dinámico con salto de línea en A1
-        ws['A1'].value = titulo_encabezado
-        ws['A1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        # Normalizar IDs de categorías
+        ids_limpios = []
+        for cid in categorias_ids_seleccionadas:
+            try:
+                ids_limpios.append(int(cid))
+            except (ValueError, TypeError):
+                continue
 
-        # Fila 5: Encabezados de Tabla (Barra Negra)
-        ws.row_dimensions[5].height = 24
-        headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
+        grupos_categorias = {}
+        for cat_id_int in ids_limpios:
+            cat_obj = db.query(CategoriaDemografica).filter(
+                CategoriaDemografica.id == cat_id_int,
+                CategoriaDemografica.empresa_id == int(empresa_id)
+            ).first()
 
-        for col_idx, text_header in enumerate(headers, 1):
-            cell = ws.cell(row=5, column=col_idx, value=text_header)
-            cell.fill = fill_encabezado
-            cell.font = font_encabezado
-            cell.alignment = alineacion_centro if col_idx > 1 else alineacion_izquierda
+            if not cat_obj:
+                continue
 
-        # Cargar valores demográficos
-        valores_por_colab = {}
-        cats_ids_grupo = [s['id'] for s in lista_subcats]
-        
-        if colab_ids_list:
-            registros_valores = db.query(ValorDemografico).filter(
-                ValorDemografico.colaborador_id.in_(colab_ids_list),
-                ValorDemografico.categoria_id.in_(cats_ids_grupo)
-            ).all()
-            for rv in registros_valores:
-                if rv.colaborador_id not in valores_por_colab:
-                    valores_por_colab[rv.colaborador_id] = {}
-                valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
+            nombre_base = re.sub(r'\s+\d+$', '', cat_obj.nombre).strip()
+            match_nivel = re.search(r'(\d+)$', cat_obj.nombre)
+            nivel_num = int(match_nivel.group(1)) if match_nivel else 1
 
-        # Procesar árbol jerárquico Padre-Hijo desde la Fila 6
-        def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
-            if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
-                return
+            if nombre_base not in grupos_categorias:
+                grupos_categorias[nombre_base] = []
 
-            subcat_actual = lista_subcats[subcat_idx]
-            cat_id_curr = subcat_actual['id']
-            nivel_curr = subcat_actual['nivel']
+            grupos_categorias[nombre_base].append({'id': cat_obj.id, 'nombre_original': cat_obj.nombre, 'nivel': nivel_num})
 
-            agrupados = {}
-            for colab_id in colabs_subconjunto:
-                val = valores_por_colab.get(colab_id, {}).get(cat_id_curr)
-                if val and str(val).strip() and str(val).lower() != 'nan':
-                    val_str = str(val).strip()
-                    if val_str not in agrupados:
-                        agrupados[val_str] = []
-                    agrupados[val_str].append(colab_id)
+        colabs_db = db.query(Colaborador.id).filter(Colaborador.empresa_id == int(empresa_id)).all()
+        colab_ids_list = [c[0] for c in colabs_db]
+        participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
 
-            for val_nombre, ids_hijos in agrupados.items():
-                b2 = float(len(ids_hijos))
-                c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
+        for nombre_grupo, lista_subcats in grupos_categorias.items():
+            lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
+            nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
+            ws = wb.create_sheet(title=nombre_hoja)
 
-                if 0 < c2 < 5:
-                    row_data = [val_nombre, int(b2), '-', '-', '-']
-                else:
-                    pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
-                    margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
-                    margen_str = f'{margen}%' if margen != '-' else '-'
-                    pct_str = f'{pct}%'
-                    row_data = [val_nombre, int(b2), int(c2), pct_str, margen_str]
+            # 1. Quitar cuadrícula gris del fondo
+            ws.views.sheetView[0].showGridLines = False
 
-                ws.append(row_data)
-                row_idx = ws.max_row
-                ws.row_dimensions[row_idx].height = 20
+            # 2. Definir anchos fijos de columnas exactos
+            ws.column_dimensions['A'].width = 80
+            ws.column_dimensions['B'].width = 25
+            ws.column_dimensions['C'].width = 25
+            ws.column_dimensions['D'].width = 25
+            ws.column_dimensions['E'].width = 25
 
-                color_hex = COLORES_NIVELES.get(nivel_curr, '000000')
-                font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_curr <= 3), color=color_hex)
-                alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_curr - 1))
+            # 3. Alturas de cabecera
+            ws.row_dimensions[1].height = 20
+            ws.row_dimensions[2].height = 20
+            ws.row_dimensions[3].height = 20
+            ws.row_dimensions[4].height = 12  # Fila vacía
 
-                for col_idx in range(1, 6):
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    cell.border = borde_celda
-                    if col_idx == 1:
-                        cell.font = font_nivel
-                        cell.alignment = alineacion_sangria
+            # 4. COMBINAR Y CONFIGURAR A1:D3 Y E1:E3
+            ws.merge_cells('A1:D3')
+            ws.merge_cells('E1:E3')
+
+            cell_title = ws['A1']
+            cell_title.value = titulo_encabezado
+            cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
+            cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+            # Estampar Logo GCTI en E1:E3
+            if os.path.exists(path_logo_gcti):
+                try:
+                    img_gcti = openpyxl_image.Image(path_logo_gcti)
+                    img_gcti.width = 90
+                    img_gcti.height = 45
+                    ws.add_image(img_gcti, 'E1')
+                except Exception as e:
+                    print(f"⚠️ Alerta Logo GCTI: {e}")
+
+            # 5. FILA 5: ENCABEZADOS DE TABLA (FRANJA NEGRA)
+            ws.row_dimensions[5].height = 24
+            headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
+
+            for col_idx, text_header in enumerate(headers, 1):
+                cell = ws.cell(row=5, column=col_idx, value=text_header)
+                cell.fill = fill_encabezado
+                cell.font = font_encabezado
+                cell.alignment = alineacion_centro if col_idx > 1 else alineacion_izquierda
+
+            # Cargar valores demográficos
+            valores_por_colab = {}
+            cats_ids_grupo = [s['id'] for s in lista_subcats]
+            
+            if colab_ids_list:
+                registros_valores = db.query(ValorDemografico).filter(
+                    ValorDemografico.colaborador_id.in_(colab_ids_list),
+                    ValorDemografico.categoria_id.in_(cats_ids_grupo)
+                ).all()
+                for rv in registros_valores:
+                    if rv.colaborador_id not in valores_por_colab:
+                        valores_por_colab[rv.colaborador_id] = {}
+                    valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
+
+            # 6. FILAS 6+: POBLADO DE DATOS Y ÁRBOL JERÁRQUICO
+            def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
+                if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
+                    return
+
+                subcat_actual = lista_subcats[subcat_idx]
+                cat_id_curr = subcat_actual['id']
+                nivel_curr = subcat_actual['nivel']
+
+                agrupados = {}
+                for colab_id in colabs_subconjunto:
+                    val = valores_por_colab.get(colab_id, {}).get(cat_id_curr)
+                    if val and str(val).strip() and str(val).lower() != 'nan':
+                        val_str = str(val).strip()
+                        if val_str not in agrupados:
+                            agrupados[val_str] = []
+                        agrupados[val_str].append(colab_id)
+
+                for val_nombre, ids_hijos in agrupados.items():
+                    b2 = float(len(ids_hijos))
+                    c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
+
+                    if 0 < c2 < 5:
+                        row_data = [val_nombre, int(b2), '-', '-', '-']
                     else:
-                        cell.font = Font(name='Century Gothic', size=10)
-                        cell.alignment = alineacion_centro
+                        pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
+                        margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
+                        margen_str = f'{margen}%' if margen != '-' else '-'
+                        pct_str = f'{pct}%'
+                        row_data = [val_nombre, int(b2), int(c2), pct_str, margen_str]
 
-                procesar_nivel_recursivo(ids_hijos, subcat_idx + 1)
+                    ws.append(row_data)
+                    row_idx = ws.max_row
+                    ws.row_dimensions[row_idx].height = 20
 
-        procesar_nivel_recursivo(colab_ids_list, 0)
+                    color_hex = COLORES_NIVELES.get(nivel_curr, '000000')
+                    font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_curr <= 3), color=color_hex)
+                    alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_curr - 1))
 
-    # Remover la pestaña molde inicial si existen pestañas generadas
-    if len(wb.sheetnames) > 1:
-        wb.remove(ws_base)
+                    for col_idx in range(1, 6):
+                        cell = ws.cell(row=row_idx, column=col_idx)
+                        cell.border = borde_celda
+                        if col_idx == 1:
+                            cell.font = font_nivel
+                            cell.alignment = alineacion_sangria
+                        else:
+                            cell.font = Font(name='Century Gothic', size=10)
+                            cell.alignment = alineacion_centro
 
-    db.close()
+                    procesar_nivel_recursivo(ids_hijos, subcat_idx + 1)
+
+            procesar_nivel_recursivo(colab_ids_list, 0)
+
+    finally:
+        db.close()
 
     output = io.BytesIO()
     wb.save(output)
