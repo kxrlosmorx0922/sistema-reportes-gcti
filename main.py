@@ -970,21 +970,34 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            # B) Insertar Logo del Cliente en E1
+            # B) Insertar Logo del Cliente en E1 (Búsqueda multiruta garantizada en Render)
             if logo_url_cliente:
                 nombre_archivo_logo = os.path.basename(logo_url_cliente)
-                path_logo_cli = os.path.join(app.root_path, 'static', 'logos_empresas', nombre_archivo_logo)
+                
+                # Probar las 3 posibles ubicaciones físicas en el servidor
+                posibles_rutas = [
+                    os.path.join(UPLOAD_FOLDER, nombre_archivo_logo),
+                    os.path.join(app.root_path, 'static', 'logos_empresas', nombre_archivo_logo),
+                    os.path.join(app.root_path, logo_url_cliente.lstrip('/'))
+                ]
+                
+                path_logo_cli = None
+                for ruta in posibles_rutas:
+                    if os.path.exists(ruta):
+                        path_logo_cli = ruta
+                        break
 
-                if os.path.exists(path_logo_cli):
+                if path_logo_cli:
                     try:
                         img_cli = OpenpyxlImage(path_logo_cli)
                         img_cli.width = 110
                         img_cli.height = 50
                         ws.add_image(img_cli, 'E1')
+                        print(f"✅ Logo cargado exitosamente desde: {path_logo_cli}")
                     except Exception as e:
-                        print(f"⚠️ Alerta Logo Cliente: {e}")
+                        print(f"⚠️ Alerta al procesar imagen del logo: {e}")
                 else:
-                    print(f"⚠️ No se encontró el archivo del logo en la ruta: {path_logo_cli}")
+                    print(f"⚠️ No se encontró el archivo del logo en el servidor. Rutas probadas: {posibles_rutas}")
 
             # 6. Fila 5: Encabezados de Tabla (Barra Negra)
             ws.row_dimensions[5].height = 24
