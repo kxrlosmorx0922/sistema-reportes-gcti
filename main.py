@@ -19,6 +19,7 @@ from database.models import Colaborador, CategoriaDemografica, ValorDemografico,
 from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.drawing.image import Image as OpenpyxlImage
 
 # Librerías oficiales de Google API
 from google.auth.transport.requests import Request
@@ -252,7 +253,7 @@ try:
     
     conn = engine.connect()
     try:
-        for col, col_type in [("fecha_inicio", "TEXT"), ("fecha_cierre", "TEXT"), ("cerrada", "INTEGER DEFAULT 0"), ("nombre_cliente", "TEXT"), ("correo_cliente", "TEXT"), ("correo_coordinador", "TEXT"), ("calendar_event_id", "TEXT")]:
+        for col, col_type in [("fecha_inicio", "TEXT"), ("fecha_cierre", "TEXT"), ("cerrada", "INTEGER DEFAULT 0"), ("nombre_cliente", "TEXT"), ("correo_cliente", "TEXT"), ("correo_coordinador", "TEXT"), ("calendar_event_id", "TEXT"), ("logo_url", "TEXT")]:
             try:
                 conn.execute(text(f"ALTER TABLE {tabla_real} ADD COLUMN {col} {col_type}"))
                 conn.connect().commit() if hasattr(conn, 'commit') else conn.commit()
@@ -327,7 +328,7 @@ def panel_admin():
     
     try:
         tabla_real = Empresa.__table__.name
-        resultado_raw = db.execute(text(f"SELECT id, nombre, fecha_inicio, fecha_cierre, cerrada, nombre_cliente, correo_cliente, correo_coordinador, calendar_event_id FROM {tabla_real}")).fetchall()
+        resultado_raw = db.execute(text(f"SELECT id, nombre, fecha_inicio, fecha_cierre, cerrada, nombre_cliente, correo_cliente, correo_coordinador, calendar_event_id, logo_url FROM {tabla_real}")).fetchall()
         
         for fila in resultado_raw:
             usr = db.query(Usuario).filter(Usuario.empresa_id == fila[0], Usuario.rol == 'cliente').first()
@@ -339,6 +340,7 @@ def panel_admin():
             c_cli = fila[6] if len(fila) > 6 and fila[6] else '-'
             c_coor = fila[7] if len(fila) > 7 and fila[7] else '-'
             ev_id = fila[8] if len(fila) > 8 and fila[8] else '-'
+            l_url = fila[9] if len(fila) > 9 and fila[9] else None
             
             organizaciones_maestras.append({
                 "id": fila[0],
@@ -350,6 +352,7 @@ def panel_admin():
                 "correo_cliente": c_cli,
                 "correo_coordinador": c_coor,
                 "calendar_event_id": ev_id,
+                "logo_url": l_url,
                 "email": usr.email if usr else "Sin canal",
                 "password": usr.password_hash if usr else "Sin clave"
             })
@@ -742,6 +745,7 @@ def calcular_margen_error(esperadas, recibidas):
     """
     Fórmula exacta de GCTI:
     =IF(C2>B2, "-", IF(C2="", "", 0.0196*50*(B2-C2)/(SQRT(C2)*(B2-1))*100))
+    Ajustado a 1 decimal
     """
     try:
         b2 = float(esperadas)
@@ -756,7 +760,7 @@ def calcular_margen_error(esperadas, recibidas):
         denominador = math.sqrt(c2) * (b2 - 1)
 
         resultado = (numerador / denominador) * 100
-        return round(resultado, 2)
+        return round(resultado, 1)
     except Exception:
         return "-"
 
@@ -788,19 +792,8 @@ def obtener_metricas(categoria_id):
         b2 = float(fila.total)
         c2 = float(fila.contestaron)
         
-        if c2 > b2:
-            margen = "-"
-        elif c2 == 0 or b2 <= 1:
-            margen = 0.0
-        else:
-            try:
-                num = 0.0196 * 50 * (b2 - c2)
-                den = math.sqrt(c2) * (b2 - 1)
-                margen = round((num / den) * 100, 2)
-            except Exception:
-                margen = "-"
-
-        if 0 < fila.contestaron < 3:
+        # Evaluar confidencialidad por Población Objetivo (Columna B < 3)
+        if b2 < 3:
             data_json.append({
                 "opcion": fila.valor, 
                 "total_colaboradores": fila.total, 
@@ -810,11 +803,23 @@ def obtener_metricas(categoria_id):
                 "anonimo": True
             })
         else:
-            pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0
+            if c2 > b2:
+                margen = "-"
+            elif c2 == 0 or b2 <= 1:
+                margen = 0.0
+            else:
+                try:
+                    num = 0.0196 * 50 * (b2 - c2)
+                    den = math.sqrt(c2) * (b2 - 1)
+                    margen = round((num / den) * 100, 1)
+                except Exception:
+                    margen = "-"
+
+            pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
             data_json.append({
                 "opcion": fila.valor, 
                 "total_colaboradores": fila.total, 
-                "han_contestado": fila.contestaron, 
+                "han_contestado": int(c2), 
                 "porcentaje_participacion": pct, 
                 "margen_error": margen,
                 "anonimo": False
@@ -866,6 +871,9 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     try:
         empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
         nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
+        
+        # Obtener ruta de logo de la empresa desde DB
+        logo_url_cliente = getattr(empresa, 'logo_url', None)
 
         # Fecha actual formateada y título en 2 líneas
         meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
@@ -885,7 +893,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         borde_fino = Side(border_style='thin', color='D9D9D9')
         borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-        # Ruta de la imagen del logo en la carpeta static
+        # Ruta del logo de GCTI por defecto
         path_logo_gcti = os.path.join(app.root_path, 'static', 'logo_gcti.png')
 
         ids_limpios = []
@@ -927,40 +935,55 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             # 1. Quitar cuadrícula de fondo
             ws.views.sheetView[0].showGridLines = False
 
-            # 2. Anchos fijos de columnas
+            # 2. INMOVILIZAR LAS PRIMERAS 5 FILAS (Título + Encabezados)
+            ws.freeze_panes = 'A6'
+
+            # 3. Anchos fijos de columnas
             ws.column_dimensions['A'].width = 80
             ws.column_dimensions['B'].width = 25
             ws.column_dimensions['C'].width = 25
             ws.column_dimensions['D'].width = 25
             ws.column_dimensions['E'].width = 25
 
-            # 3. Alturas de filas iniciales
+            # 4. Alturas de filas iniciales
             ws.row_dimensions[1].height = 20
             ws.row_dimensions[2].height = 20
             ws.row_dimensions[3].height = 20
             ws.row_dimensions[4].height = 12
 
-            # 4. Combinar A1:D3 para Título y E1:E3 para Logo
-            ws.merge_cells('A1:D3')
+            # 5. Configurar celda A1:A3 para Logo GCTI, B1:D3 para Título y E1:E3 para Logo Cliente
+            ws.merge_cells('A1:A3')
+            ws.merge_cells('B1:D3')
             ws.merge_cells('E1:E3')
 
-            cell_title = ws['A1']
+            cell_title = ws['B1']
             cell_title.value = titulo_encabezado
             cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
             cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-            # Insertar logo en E1 si existe en la carpeta static
+            # A) Insertar Logo de GCTI a la IZQUIERDA en A1
             if os.path.exists(path_logo_gcti):
                 try:
-                    from openpyxl.drawing.image import Image as OpenpyxlImage
                     img_gcti = OpenpyxlImage(path_logo_gcti)
                     img_gcti.width = 110
                     img_gcti.height = 50
-                    ws.add_image(img_gcti, 'E1')
+                    ws.add_image(img_gcti, 'A1')
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            # 5. Fila 5: Encabezados de Tabla (Barra Negra)
+            # B) Insertar Logo del Cliente a la DERECHA en E1
+            if logo_url_cliente:
+                path_logo_cli = os.path.join(app.root_path, logo_url_cliente.lstrip('/'))
+                if os.path.exists(path_logo_cli):
+                    try:
+                        img_cli = OpenpyxlImage(path_logo_cli)
+                        img_cli.width = 110
+                        img_cli.height = 50
+                        ws.add_image(img_cli, 'E1')
+                    except Exception as e:
+                        print(f"⚠️ Alerta Logo Cliente: {e}")
+
+            # 6. Fila 5: Encabezados de Tabla (Barra Negra)
             ws.row_dimensions[5].height = 24
             headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
 
@@ -970,7 +993,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 cell.font = font_encabezado
                 cell.alignment = alineacion_centro if col_idx > 1 else alineacion_izquierda
 
-            # 6. Cargar datos demográficos
+            # 7. Cargar datos demográficos
             valores_por_colab = {}
             cats_ids_grupo = [s['id'] for s in lista_subcats]
             
@@ -984,7 +1007,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                         valores_por_colab[rv.colaborador_id] = {}
                     valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
 
-            # 7. Poblado de Datos (Árbol Jerárquico desde Fila 6)
+            # 8. Poblado de Datos (Árbol Jerárquico desde Fila 6)
             def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
                 if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
                     return
@@ -1003,14 +1026,16 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                         agrupados[val_str].append(colab_id)
 
                 for val_nombre, ids_hijos in agrupados.items():
-                    b2 = float(len(ids_hijos))
+                    b2 = float(len(ids_hijos))  # Población Objetivo (Columna B)
                     c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
 
-                    if 0 < c2 < 3:
+                    # Regla estricta: Si Población Objetivo (b2) < 3 -> Siempre Guiones en C, D, E
+                    if b2 < 3:
                         row_data = [val_nombre, int(b2), '-', '-', '-']
                     else:
                         pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
                         margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
+                        
                         margen_str = f'{margen}%' if margen != '-' else '-'
                         pct_str = f'{pct}%'
                         row_data = [val_nombre, int(b2), int(c2), pct_str, margen_str]
@@ -1071,7 +1096,7 @@ def descargar_reporte_excel():
         hoy_str = datetime.now().strftime("%d_%m_%Y")
         
         # 2. Armar el nombre de archivo personalizado requerido
-        nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participación {hoy_str}.xlsx"
+        nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participacion {hoy_str}.xlsx"
 
         # 3. Generar el flujo del Excel
         excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
@@ -1114,7 +1139,7 @@ def enviar_reporte_email():
     excel_stream.seek(0)
 
     hoy_str = datetime.now().strftime("%d_%m_%Y")
-    nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participación {hoy_str}.xlsx"
+    nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participacion {hoy_str}.xlsx"
 
     remitente_autenticado = 'carlos.mora@peoplesvoice.co'
     nombre_remitente = session.get('nombre', 'Portal GCTI®')
