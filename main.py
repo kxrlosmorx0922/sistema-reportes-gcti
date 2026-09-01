@@ -870,7 +870,7 @@ def progreso_global():
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     db = SessionLocal()
     
-    # Cargar la plantilla pre-diseñada que YA TIENE el logo de GCTI en E1
+    # 1. Cargar la plantilla fija pré-diseñada
     path_plantilla = os.path.join(app.root_path, 'static', 'plantilla_reporte.xlsx')
     
     if os.path.exists(path_plantilla):
@@ -883,7 +883,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
     nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
 
-    # Texto en dos líneas para la celda A1 (A1:D3 combinadas en la plantilla)
+    # Texto en dos líneas para A1 (A1:D3 combinadas en la plantilla)
     meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     hoy = datetime.now()
     fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
@@ -901,7 +901,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     borde_fino = Side(border_style='thin', color='D9D9D9')
     borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-    # Normalizar IDs de categorías
+    # Normalización de IDs seleccionados
     ids_limpios = []
     for cid in categorias_ids_seleccionadas:
         try:
@@ -932,31 +932,24 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     colab_ids_list = [c[0] for c in colabs_db]
     participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
 
+    # Copiar plantilla y escribir los datos a partir de la fila 6
     for nombre_grupo, lista_subcats in grupos_categorias.items():
         lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
         nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
         
-        # Duplicar la hoja respetando el diseño y el logo de la plantilla
         ws = wb.copy_worksheet(ws_base)
         ws.title = nombre_hoja
         ws.views.sheetView[0].showGridLines = False
 
-        # Solo actualizar el texto del título en A1
+        # Actualizar celda de título A1
         ws['A1'].value = titulo_encabezado
         ws['A1'].font = Font(name='Century Gothic', size=11, bold=True, color='000000')
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-        # Fila 5: Encabezados de Tabla (Barra Negra)
-        ws.row_dimensions[5].height = 24
-        headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
+        # Nombre dinámico en el primer encabezado de la fila 5
+        ws.cell(row=5, column=1, value=nombre_grupo)
 
-        for col_idx, text_header in enumerate(headers, 1):
-            cell = ws.cell(row=5, column=col_idx, value=text_header)
-            cell.fill = fill_encabezado
-            cell.font = font_encabezado
-            cell.alignment = alineacion_centro if col_idx > 1 else alineacion_izquierda
-
-        # Cargar datos demográficos
+        # Cargar mapeo de datos
         valores_por_colab = {}
         cats_ids_grupo = [s['id'] for s in lista_subcats]
         
@@ -970,7 +963,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                     valores_por_colab[rv.colaborador_id] = {}
                 valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
 
-        # Cargar filas de la tabla desde la Fila 6
+        # POBLAR DATOS DESDE LA FILA 6
         def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
             if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
                 return
@@ -1023,7 +1016,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
         procesar_nivel_recursivo(colab_ids_list, 0)
 
-    # Remover la pestaña molde si se crearon pestañas de datos
+    # Eliminar hoja molde
     if len(wb.sheetnames) > 1:
         wb.remove(ws_base)
 
