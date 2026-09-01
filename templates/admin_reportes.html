@@ -323,16 +323,30 @@ function descargarExcelDirecto() {
     })
     .then(response => {
         if (!response.ok) throw new Error("Error en la respuesta del servidor");
-        return response.blob();
+        
+        // 1. EXTRAER EL NOMBRE DEL ARCHIVO ENVIADO POR PYTHON DESDE LOS HEADERS
+        let fileName = "Reporte_Participacion.xlsx";
+        const disposition = response.headers.get('content-disposition');
+        
+        if (disposition && disposition.indexOf('filename=') !== -1) {
+            const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+            if (matches != null && matches[1]) { 
+                fileName = matches[1].replace(/['"]/g, '');
+            }
+        }
+
+        return response.blob().then(blob => ({ blob, fileName }));
     })
-    .then(blob => {
+    .then(({ blob, fileName }) => {
+        // 2. DESCARGAR USANDO EL NOMBRE EXTRAÍDO DINÁMICAMENTE
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Reporte_GCTI_Demografias.xlsx`;
+        a.download = fileName; // ✅ TOMA EL NOMBRE DINÁMICO
         document.body.appendChild(a);
         a.click();
         a.remove();
+        window.URL.revokeObjectURL(url);
         
         // Notificación de éxito
         alert("✅ El reporte en Excel se ha generado y descargado exitosamente en tu equipo.");
