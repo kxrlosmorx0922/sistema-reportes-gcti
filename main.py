@@ -873,9 +873,9 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     db = SessionLocal()
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     nombre_empresa = empresa.nombre if empresa else 'Organización'
-    logo_cliente_url = empresa.logo_url if empresa else None
+    logo_cliente_url = empresa.logo_url if (empresa and empresa.logo_url and empresa.logo_url != '-') else None
 
-    # Fecha actual formateada (ej: 01 de septiembre de 2026)
+    # Fecha actual formateada
     meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     hoy = datetime.now()
     fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
@@ -892,7 +892,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     borde_fino = Side(border_style='thin', color='D9D9D9')
     borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-    # Identificar ruta del logo de GCTI por defecto
+    # Ruta del logo de GCTI
     path_logo_gcti = os.path.join(app.root_path, 'static', 'logo_gcti.png')
 
     # Agrupar categorías seleccionadas
@@ -929,22 +929,20 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
         ws = wb.create_sheet(title=nombre_hoja)
 
-        # -------------------------------------------------------------
-        # BLOQUE SUPERIOR DE ENCABEZADO (FILAS 1 A 3)
-        # -------------------------------------------------------------
+        # Configuración de alto de filas para el encabezado
         ws.row_dimensions[1].height = 25
         ws.row_dimensions[2].height = 25
         ws.row_dimensions[3].height = 25
 
-        # Título centrado combinado de B1 a D3
+        # Título centrado combinado
         ws.merge_cells('B1:D3')
         cell_title = ws['B1']
         cell_title.value = titulo_encabezado
         cell_title.font = Font(name='Century Gothic', size=13, bold=True, color='000000')
         cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-        # Insertar Logo Cliente en A1
-        if logo_cliente_url:
+        # Insertar Logo Cliente en A1 (Validado de forma segura)
+        if logo_cliente_url and isinstance(logo_cliente_url, str):
             path_relativo = logo_cliente_url.lstrip('/')
             path_full_cliente = os.path.join(app.root_path, path_relativo)
             if os.path.exists(path_full_cliente):
@@ -969,13 +967,11 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         # Fila 4: Espacio separador en blanco
         ws.row_dimensions[4].height = 10
 
-        # -------------------------------------------------------------
-        # FILA 5: ENCABEZADOS DE TABLA (FILA 5 EN LUGAR DE FILA 1)
-        # -------------------------------------------------------------
+        # Fila 5: Encabezados de tabla
         ws.row_dimensions[5].height = 22
         headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
-        ws.append([])  # Fila 4 vacía
-        ws.append(headers)  # Fila 5 headers
+        ws.append([])  # Fila 4 libre
+        ws.append(headers)  # Fila 5
 
         for col_num in range(1, 6):
             cell = ws.cell(row=5, column=col_num)
