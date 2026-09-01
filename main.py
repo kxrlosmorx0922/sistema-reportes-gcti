@@ -916,7 +916,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             CategoriaDemografica.empresa_id == int(empresa_id)
         ).all()
 
-        colabs_db = db.query(Colaborador.id).filter(Colaborador.empresa_id == int(empresa_id)).all()
+        colabs_db = db.query(Colaborador.id, Colaborador.identificacion, Colaborador.email, Colaborador.nombre).filter(Colaborador.empresa_id == int(empresa_id)).all()
         colab_ids_list = [c[0] for c in colabs_db]
         participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
 
@@ -1037,6 +1037,94 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                     else:
                         cell.font = font_datos
                         cell.alignment = alineacion_centro
+
+        # =================================================================
+        # 📌 HOJA ADICIONAL "FALTANTES" (Personas que aún no responden)
+        # =================================================================
+        faltantes = [c for c in colabs_db if c[0] not in participaciones_set]
+
+        ws_faltantes = wb.create_sheet(title="Faltantes")
+        ws_faltantes.views.sheetView[0].showGridLines = False
+        ws_faltantes.freeze_panes = 'A6'
+
+        # Anchos de columnas para Faltantes
+        ws_faltantes.column_dimensions['A'].width = 25  # Identificación
+        ws_faltantes.column_dimensions['B'].width = 40  # Correo Electrónico
+        ws_faltantes.column_dimensions['C'].width = 40  # Nombre del Colaborador
+        ws_faltantes.column_dimensions['D'].width = 20  # Estado
+        ws_faltantes.column_dimensions['E'].width = 15
+
+        # Encabezado Superior Institucional
+        ws_faltantes.row_dimensions[1].height = 20
+        ws_faltantes.row_dimensions[2].height = 20
+        ws_faltantes.row_dimensions[3].height = 20
+        ws_faltantes.row_dimensions[4].height = 12
+
+        ws_faltantes.merge_cells('A1:D3')
+        ws_faltantes.merge_cells('E1:E3')
+
+        cell_title_f = ws_faltantes['A1']
+        cell_title_f.value = titulo_encabezado
+        cell_title_f.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
+        cell_title_f.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        if os.path.exists(path_logo_gcti):
+            try:
+                img_gcti = OpenpyxlImage(path_logo_gcti)
+                img_gcti.width = 110
+                img_gcti.height = 50
+                ws_faltantes.add_image(img_gcti, 'A1')
+            except Exception:
+                pass
+
+        if logo_url_cliente:
+            nombre_archivo_logo = os.path.basename(logo_url_cliente)
+            rutas_de_busqueda = [
+                os.path.join(UPLOAD_FOLDER, nombre_archivo_logo),
+                os.path.join(app.root_path, 'static', 'logos_empresas', nombre_archivo_logo),
+                os.path.join(app.root_path, logo_url_cliente.lstrip('/'))
+            ]
+            path_logo_cli = next((r for r in rutas_de_busqueda if os.path.exists(r)), None)
+
+            if path_logo_cli:
+                try:
+                    img_cli = OpenpyxlImage(path_logo_cli)
+                    img_cli.width = 110
+                    img_cli.height = 50
+                    ws_faltantes.add_image(img_cli, 'E1')
+                except Exception:
+                    pass
+
+        # Fila 5: Encabezado de la Tabla de Faltantes
+        ws_faltantes.row_dimensions[5].height = 24
+        headers_faltantes = ['Identificación', 'Correo Electrónico', 'Nombre del Colaborador', 'Estado', '']
+
+        for col_idx, text_header in enumerate(headers_faltantes, 1):
+            cell = ws_faltantes.cell(row=5, column=col_idx, value=text_header)
+            cell.fill = fill_encabezado
+            cell.font = font_encabezado
+            cell.alignment = alineacion_centro if col_idx > 3 else alineacion_izquierda
+
+        # Cargar la lista de colaboradores pendientes por responder
+        for colab in faltantes:
+            ident_colab = colab[1] or '-'
+            email_colab = colab[2] or '-'
+            nombre_colab = colab[3] or '-'
+            row_data = [ident_colab, email_colab, nombre_colab, 'Pendiente', '']
+
+            ws_faltantes.append(row_data)
+            row_idx = ws_faltantes.max_row
+            ws_faltantes.row_dimensions[row_idx].height = 20
+
+            for col_idx in range(1, 6):
+                cell = ws_faltantes.cell(row=row_idx, column=col_idx)
+                cell.border = borde_celda
+                if col_idx in (1, 2, 3):
+                    cell.font = font_opcion
+                    cell.alignment = alineacion_izquierda
+                else:
+                    cell.font = font_datos
+                    cell.alignment = alineacion_centro
 
     finally:
         db.close()
