@@ -876,11 +876,11 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     db = SessionLocal()
     
     try:
-        empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
-        nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
+        tabla_real = Empresa.__table__.name
+        emp_res = db.execute(text(f"SELECT nombre, logo_url FROM {tabla_real} WHERE id = :id"), {"id": int(empresa_id)}).fetchone()
         
-        # Obtener ruta de logo de la empresa desde DB
-        logo_url_cliente = getattr(empresa, 'logo_url', None)
+        nombre_empresa = emp_res[0].strip() if emp_res and emp_res[0] else 'Organización'
+        logo_url_cliente = emp_res[1] if emp_res and len(emp_res) > 1 else None
 
         # Fecha actual formateada y título en 2 líneas
         meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
