@@ -237,11 +237,12 @@
                     {% endfor %}
                 </div>
 
+                <!-- 🔴 AQUÍ VAN LOS DOS BOTONES CON SUS RESPECTIVOS ID 🔴 -->
                 <div style="display: flex; gap: 1rem; margin-top: 1rem;">
-                    <button type="button" onclick="descargarExcelDirecto()" style="background-color: #2ecc71; color: white; font-weight: bold; padding: 0.75rem 1.5rem; width: auto; border: none; border-radius: 6px; cursor: pointer;">
+                    <button type="button" id="btn-descargar-excel" onclick="descargarExcelDirecto()" style="background-color: #2ecc71; color: white; font-weight: bold; padding: 0.75rem 1.5rem; width: auto; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s;">
                         📊 Descargar Excel Multi-Hoja
                     </button>
-                    <button type="button" onclick="enviarReportePorEmail()" style="background-color: #000000; color: white; font-weight: bold; padding: 0.75rem 1.5rem; width: auto; border: none; border-radius: 6px; cursor: pointer;">
+                    <button type="button" id="btn-enviar-mail" onclick="enviarReportePorEmail()" style="background-color: #000000; color: white; font-weight: bold; padding: 0.75rem 1.5rem; width: auto; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s;">
                         📧 Enviar por Correo Directo
                     </button>
                 </div>
@@ -308,7 +309,7 @@ function descargarExcelDirecto() {
         return;
     }
 
-    // Estado de Carga
+    // Estado de Carga Visual
     btn.disabled = true;
     const textoOriginal = btn.innerHTML;
     btn.innerHTML = "⏳ Generando árbol jerárquico y Excel...";
@@ -364,7 +365,7 @@ function enviarReportePorEmail() {
         return;
     }
 
-    // Estado de Carga
+    // Estado de Carga Visual
     btn.disabled = true;
     const textoOriginal = btn.innerHTML;
     btn.innerHTML = "⏳ Generando Excel y conectando con SMTP...";
