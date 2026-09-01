@@ -295,17 +295,25 @@ function obtenerDemografiasSeleccionadas() {
 }
 
 function descargarExcelDirecto() {
+    const btn = document.getElementById('btn-descargar-excel');
     const categoriasIds = obtenerDemografiasSeleccionadas();
     
     if (!empresaActualId || empresaActualId === "None" || empresaActualId === "") {
-        alert('Debe seleccionar primero una organización.');
+        alert('⚠️ Debe seleccionar primero una organización.');
         return;
     }
 
     if (categoriasIds.length === 0) {
-        alert('Debe marcar al menos una demografía para exportar.');
+        alert('⚠️ Debe marcar al menos una demografía para exportar.');
         return;
     }
+
+    // Estado de Carga
+    btn.disabled = true;
+    const textoOriginal = btn.innerHTML;
+    btn.innerHTML = "⏳ Generando árbol jerárquico y Excel...";
+    btn.style.opacity = "0.7";
+    btn.style.cursor = "wait";
 
     fetch('/admin/descargar-reporte-excel', {
         method: 'POST',
@@ -313,7 +321,7 @@ function descargarExcelDirecto() {
         body: JSON.stringify({ empresa_id: parseInt(empresaActualId), categorias_ids: categoriasIds })
     })
     .then(response => {
-        if (!response.ok) throw new Error("Error en la descarga del Excel");
+        if (!response.ok) throw new Error("Error en la respuesta del servidor");
         return response.blob();
     })
     .then(blob => {
@@ -324,11 +332,22 @@ function descargarExcelDirecto() {
         document.body.appendChild(a);
         a.click();
         a.remove();
+        
+        // Notificación de éxito
+        alert("✅ El reporte en Excel se ha generado y descargado exitosamente en tu equipo.");
     })
-    .catch(err => alert('Error al generar el archivo Excel: ' + err));
+    .catch(err => alert('❌ Error al generar el archivo Excel: ' + err))
+    .finally(() => {
+        // Restaurar Botón
+        btn.disabled = false;
+        btn.innerHTML = textoOriginal;
+        btn.style.opacity = "1";
+        btn.style.cursor = "pointer";
+    });
 }
 
 function enviarReportePorEmail() {
+    const btn = document.getElementById('btn-enviar-mail');
     const seleccionados = obtenerDemografiasSeleccionadas();
 
     if (!empresaActualId || empresaActualId === "None" || empresaActualId === "") {
@@ -345,6 +364,13 @@ function enviarReportePorEmail() {
         return;
     }
 
+    // Estado de Carga
+    btn.disabled = true;
+    const textoOriginal = btn.innerHTML;
+    btn.innerHTML = "⏳ Generando Excel y conectando con SMTP...";
+    btn.style.opacity = "0.7";
+    btn.style.cursor = "wait";
+
     fetch('/admin/enviar-reporte-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -358,12 +384,19 @@ function enviarReportePorEmail() {
         if (data.success) {
             alert("✅ " + data.mensaje);
         } else {
-            alert("❌ " + (data.error || "Ocurrió un error en el envío."));
+            alert("❌ " + (data.error || "Ocurrió un error en el envío del correo."));
         }
     })
     .catch(err => {
         console.error(err);
         alert("❌ Error al procesar la solicitud de correo.");
+    })
+    .finally(() => {
+        // Restaurar Botón
+        btn.disabled = false;
+        btn.innerHTML = textoOriginal;
+        btn.style.opacity = "1";
+        btn.style.cursor = "pointer";
     });
 }
 
