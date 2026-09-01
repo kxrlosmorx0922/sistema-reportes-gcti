@@ -800,7 +800,7 @@ def obtener_metricas(categoria_id):
             except Exception:
                 margen = "-"
 
-        if 0 < fila.contestaron < 5:
+        if 0 < fila.contestaron < 3:
             data_json.append({
                 "opcion": fila.valor, 
                 "total_colaboradores": fila.total, 
@@ -1006,7 +1006,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                     b2 = float(len(ids_hijos))
                     c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
 
-                    if 0 < c2 < 5:
+                    if 0 < c2 < 3:
                         row_data = [val_nombre, int(b2), '-', '-', '-']
                     else:
                         pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
