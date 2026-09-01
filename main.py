@@ -41,31 +41,46 @@ def allowed_file(filename):
 
 @app.route('/admin/cargar-logo-empresa', methods=['POST'])
 def cargar_logo_empresa():
-    # ... validaciones de sesión ...
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
+        return redirect('/login')
+
+    empresa_id = request.form.get('empresa_id')
+    archivo = request.files.get('logo_cliente')
+
+    if not empresa_id or not archivo or archivo.filename == '':
+        flash("⚠️ Por favor seleccione la empresa y una imagen válida.", "warning")
+        return redirect('/admin')
+
     if archivo and allowed_file(archivo.filename):
+        # Asegurar la creación física del directorio de almacenamiento
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        
         db = SessionLocal()
         try:
-            # Asegurar que el directorio static/logos_empresas existe
-            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-            
             filename = secure_filename(f"logo_empresa_{empresa_id}_{archivo.filename}")
             filepath = os.path.join(UPLOAD_FOLDER, filename)
             archivo.save(filepath)
 
-            # Guardar la ruta relativa limpia
-            ruta_db = f"/static/logos_empresas/{filename}"
+            # Ruta relativa para almacenamiento en la base de datos
+            ruta_relativa = f"/static/logos_empresas/{filename}"
             tabla_real = Empresa.__table__.name
+            
             db.execute(
                 text(f"UPDATE {tabla_real} SET logo_url = :url WHERE id = :id"),
-                {"url": ruta_db, "id": int(empresa_id)}
+                {"url": ruta_relativa, "id": int(empresa_id)}
             )
             db.commit()
             flash("🎨 Logo de la organización actualizado con éxito.", "success")
         except Exception as e:
             db.rollback()
+            print(f"❌ Error interno al subir logo: {str(e)}")
             flash(f"❌ Error al guardar la imagen: {str(e)}", "danger")
         finally:
             db.close()
+    else:
+        flash("⚠️ Formato de imagen no permitido (Use PNG, JPG o JPEG).", "warning")
+
+    return redirect('/admin')
 
 # =================================================================
 # 📅 MOTOR 1: INTEGRACIÓN CON GOOGLE CALENDAR API (CREAR Y BORRAR)
