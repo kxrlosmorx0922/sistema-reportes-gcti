@@ -960,7 +960,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
             cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-            # A) Logo de GCTI en A1 (Extremo Izquierdo sobre la celda combinada A1:D3)
+            # A) Logo de GCTI en A1 (Extremo Izquierdo sobre A1:D3)
             if os.path.exists(path_logo_gcti):
                 try:
                     img_gcti = OpenpyxlImage(path_logo_gcti)
@@ -970,11 +970,11 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            # B) Logo del Cliente en E1 (Extremo Derecho)
+            # B) Logo del Cliente en E1 (Extremo Derecho E1:E3)
             if logo_url_cliente:
-                # Limpiar ruta relativa para encontrar la imagen en el disco de Render/Flask
-                ruta_limpia = logo_url_cliente.replace('/static/', '') if logo_url_cliente.startswith('/static/') else logo_url_cliente.lstrip('/')
-                path_logo_cli = os.path.join(app.root_path, 'static', ruta_limpia) if not ruta_limpia.startswith('static') else os.path.join(app.root_path, ruta_limpia)
+                # Corregir la ruta para que Python la encuentre en el disco de Render sin errores
+                nombre_archivo_logo = os.path.basename(logo_url_cliente)
+                path_logo_cli = os.path.join(UPLOAD_FOLDER, nombre_archivo_logo)
 
                 if os.path.exists(path_logo_cli):
                     try:
