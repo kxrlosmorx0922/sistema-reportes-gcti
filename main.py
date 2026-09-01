@@ -934,35 +934,36 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         ws.row_dimensions[2].height = 25
         ws.row_dimensions[3].height = 25
 
-        # Título centrado combinado
+        # Título centrado combinado de B1 a D3
         ws.merge_cells('B1:D3')
         cell_title = ws['B1']
         cell_title.value = titulo_encabezado
-        cell_title.font = Font(name='Century Gothic', size=13, bold=True, color='000000')
+        cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
         cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-        # Insertar Logo Cliente en A1 (Validado de forma segura)
-        if logo_cliente_url and isinstance(logo_cliente_url, str):
-            path_relativo = logo_cliente_url.lstrip('/')
-            path_full_cliente = os.path.join(app.root_path, path_relativo)
-            if os.path.exists(path_full_cliente):
-                try:
+        # Inserción de Logo Cliente en A1
+        if logo_cliente_url:
+            try:
+                # Normalización de la ruta limpia de la imagen
+                rel_path = str(logo_cliente_url).replace('\\', '/').lstrip('/')
+                path_full_cliente = os.path.normpath(os.path.join(app.root_path, rel_path))
+                if os.path.exists(path_full_cliente):
                     img_cliente = openpyxl_image.Image(path_full_cliente)
-                    img_cliente.width = 110
-                    img_cliente.height = 55
+                    img_cliente.width = 100
+                    img_cliente.height = 50
                     ws.add_image(img_cliente, 'A1')
-                except Exception as e:
-                    print(f"⚠️ No se pudo insertar logo cliente: {e}")
+            except Exception as err_img:
+                print(f"⚠️ No se pudo estampar el logo del cliente: {err_img}")
 
-        # Insertar Logo GCTI en E1
+        # Inserción de Logo GCTI en E1
         if os.path.exists(path_logo_gcti):
             try:
                 img_gcti = openpyxl_image.Image(path_logo_gcti)
-                img_gcti.width = 110
-                img_gcti.height = 55
+                img_gcti.width = 100
+                img_gcti.height = 50
                 ws.add_image(img_gcti, 'E1')
-            except Exception as e:
-                print(f"⚠️ No se pudo insertar logo GCTI: {e}")
+            except Exception as err_gcti:
+                print(f"⚠️ No se pudo estampar el logo de GCTI: {err_gcti}")
 
         # Fila 4: Espacio separador en blanco
         ws.row_dimensions[4].height = 10
