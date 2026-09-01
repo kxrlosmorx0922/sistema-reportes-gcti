@@ -871,188 +871,190 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     wb.remove(wb.active)
 
     db = SessionLocal()
-    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
-    nombre_empresa = empresa.nombre if empresa else 'Organización'
-    logo_cliente_url = empresa.logo_url if (empresa and empresa.logo_url and empresa.logo_url != '-') else None
-
-    # Fecha actual formateada
-    meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    hoy = datetime.now()
-    fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
-    titulo_encabezado = f"Great Culture to Innovate México - Reporte de Participación {fecha_formateada}"
-
-    COLORES_NIVELES = {
-        1: 'C00000', 2: '0000FF', 3: '70AD47', 4: 'C65911', 5: '7030A0', 6: 'A6A6A6', 7: '000000'
-    }
-
-    fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
-    font_encabezado = Font(name='Century Gothic', size=11, bold=True, color='FFFFFF')
-    alineacion_centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    alineacion_izquierda = Alignment(horizontal='left', vertical='center')
-    borde_fino = Side(border_style='thin', color='D9D9D9')
-    borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
-
-    # Ruta del logo de GCTI
-    path_logo_gcti = os.path.join(app.root_path, 'static', 'logo_gcti.png')
-
-    # Agrupar categorías seleccionadas
-    grupos_categorias = {}
-    for cat_id in categorias_ids_seleccionadas:
-        try:
-            cat_id_int = int(cat_id)
-        except (ValueError, TypeError):
-            continue
-
-        cat_obj = db.query(CategoriaDemografica).filter(
-            CategoriaDemografica.id == cat_id_int,
-            CategoriaDemografica.empresa_id == empresa_id
-        ).first()
-
-        if not cat_obj:
-            continue
-
-        nombre_base = re.sub(r'\s+\d+$', '', cat_obj.nombre).strip()
-        match_nivel = re.search(r'(\d+)$', cat_obj.nombre)
-        nivel_num = int(match_nivel.group(1)) if match_nivel else 1
-
-        if nombre_base not in grupos_categorias:
-            grupos_categorias[nombre_base] = []
-
-        grupos_categorias[nombre_base].append({'id': cat_obj.id, 'nombre_original': cat_obj.nombre, 'nivel': nivel_num})
-
-    colabs_db = db.query(Colaborador.id).filter(Colaborador.empresa_id == empresa_id).all()
-    colab_ids_list = [c[0] for c in colabs_db]
-    participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
-
-    for nombre_grupo, lista_subcats in grupos_categorias.items():
-        lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
-        nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
-        ws = wb.create_sheet(title=nombre_hoja)
-
-        # Configuración de alto de filas para el encabezado
-        ws.row_dimensions[1].height = 25
-        ws.row_dimensions[2].height = 25
-        ws.row_dimensions[3].height = 25
-
-        # Título centrado combinado de B1 a D3
-        ws.merge_cells('B1:D3')
-        cell_title = ws['B1']
-        cell_title.value = titulo_encabezado
-        cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
-        cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-
-        # Inserción de Logo Cliente en A1
-        if logo_cliente_url:
-            try:
-                # Normalización de la ruta limpia de la imagen
-                rel_path = str(logo_cliente_url).replace('\\', '/').lstrip('/')
-                path_full_cliente = os.path.normpath(os.path.join(app.root_path, rel_path))
-                if os.path.exists(path_full_cliente):
-                    img_cliente = openpyxl_image.Image(path_full_cliente)
-                    img_cliente.width = 100
-                    img_cliente.height = 50
-                    ws.add_image(img_cliente, 'A1')
-            except Exception as err_img:
-                print(f"⚠️ No se pudo estampar el logo del cliente: {err_img}")
-
-        # Inserción de Logo GCTI en E1
-        if os.path.exists(path_logo_gcti):
-            try:
-                img_gcti = openpyxl_image.Image(path_logo_gcti)
-                img_gcti.width = 100
-                img_gcti.height = 50
-                ws.add_image(img_gcti, 'E1')
-            except Exception as err_gcti:
-                print(f"⚠️ No se pudo estampar el logo de GCTI: {err_gcti}")
-
-        # Fila 4: Espacio separador en blanco
-        ws.row_dimensions[4].height = 10
-
-        # Fila 5: Encabezados de tabla
-        ws.row_dimensions[5].height = 22
-        headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
-        ws.append([])  # Fila 4 libre
-        ws.append(headers)  # Fila 5
-
-        for col_num in range(1, 6):
-            cell = ws.cell(row=5, column=col_num)
-            cell.fill = fill_encabezado
-            cell.font = font_encabezado
-            cell.alignment = alineacion_centro if col_num > 1 else alineacion_izquierda
-
-        # Cargar valores demográficos
-        valores_por_colab = {}
-        cats_ids_grupo = [s['id'] for s in lista_subcats]
+    
+    try:
+        empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
+        nombre_empresa = empresa.nombre if empresa else 'Organización'
         
-        if colab_ids_list:
-            registros_valores = db.query(ValorDemografico).filter(
-                ValorDemografico.colaborador_id.in_(colab_ids_list),
-                ValorDemografico.categoria_id.in_(cats_ids_grupo)
-            ).all()
-            for rv in registros_valores:
-                if rv.colaborador_id not in valores_por_colab:
-                    valores_por_colab[rv.colaborador_id] = {}
-                valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
+        logo_cliente_url = None
+        if empresa and hasattr(empresa, 'logo_url') and empresa.logo_url:
+            val_str = str(empresa.logo_url).strip()
+            if val_str not in ['', '-', 'None']:
+                logo_cliente_url = val_str
 
-        # Procesar árbol jerárquico
-        def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
-            if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
-                return
+        # Fecha actual formateada
+        meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+        hoy = datetime.now()
+        fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
+        titulo_encabezado = f"Great Culture to Innovate México - Reporte de Participación {fecha_formateada}"
 
-            subcat_actual = lista_subcats[subcat_idx]
-            cat_id_curr = subcat_actual['id']
-            nivel_curr = subcat_actual['nivel']
+        COLORES_NIVELES = {
+            1: 'C00000', 2: '0000FF', 3: '70AD47', 4: 'C65911', 5: '7030A0', 6: 'A6A6A6', 7: '000000'
+        }
 
-            agrupados = {}
-            for colab_id in colabs_subconjunto:
-                val = valores_por_colab.get(colab_id, {}).get(cat_id_curr)
-                if val and str(val).strip() and str(val).lower() != 'nan':
-                    val_str = str(val).strip()
-                    if val_str not in agrupados:
-                        agrupados[val_str] = []
-                    agrupados[val_str].append(colab_id)
+        fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
+        font_encabezado = Font(name='Century Gothic', size=11, bold=True, color='FFFFFF')
+        alineacion_centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        alineacion_izquierda = Alignment(horizontal='left', vertical='center')
+        borde_fino = Side(border_style='thin', color='D9D9D9')
+        borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-            for val_nombre, ids_hijos in agrupados.items():
-                b2 = float(len(ids_hijos))
-                c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
+        path_logo_gcti = os.path.join(app.root_path, 'static', 'logo_gcti.png')
 
-                if 0 < c2 < 5:
-                    row_data = [val_nombre, int(b2), '-', '-', '-']
-                else:
-                    pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
-                    margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
-                    margen_str = f'{margen}%' if margen != '-' else '-'
-                    pct_str = f'{pct}%'
-                    row_data = [val_nombre, int(b2), int(c2), pct_str, margen_str]
+        # Normalizar IDs de categorías a enteros
+        ids_limpios = []
+        for cid in categorias_ids_seleccionadas:
+            try:
+                ids_limpios.append(int(cid))
+            except (ValueError, TypeError):
+                continue
 
-                ws.append(row_data)
-                row_idx = ws.max_row
+        # Agrupar categorías por su raíz
+        grupos_categorias = {}
+        for cat_id_int in ids_limpios:
+            cat_obj = db.query(CategoriaDemografica).filter(
+                CategoriaDemografica.id == cat_id_int,
+                CategoriaDemografica.empresa_id == int(empresa_id)
+            ).first()
 
-                color_hex = COLORES_NIVELES.get(nivel_curr, '000000')
-                font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_curr <= 3), color=color_hex)
-                alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_curr - 1))
+            if not cat_obj:
+                continue
 
-                for col_idx in range(1, 6):
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    cell.border = borde_celda
-                    if col_idx == 1:
-                        cell.font = font_nivel
-                        cell.alignment = alineacion_sangria
+            nombre_base = re.sub(r'\s+\d+$', '', cat_obj.nombre).strip()
+            match_nivel = re.search(r'(\d+)$', cat_obj.nombre)
+            nivel_num = int(match_nivel.group(1)) if match_nivel else 1
+
+            if nombre_base not in grupos_categorias:
+                grupos_categorias[nombre_base] = []
+
+            grupos_categorias[nombre_base].append({'id': cat_obj.id, 'nombre_original': cat_obj.nombre, 'nivel': nivel_num})
+
+        colabs_db = db.query(Colaborador.id).filter(Colaborador.empresa_id == int(empresa_id)).all()
+        colab_ids_list = [c[0] for c in colabs_db]
+        participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
+
+        for nombre_grupo, lista_subcats in grupos_categorias.items():
+            lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
+            nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
+            ws = wb.create_sheet(title=nombre_hoja)
+
+            ws.row_dimensions[1].height = 25
+            ws.row_dimensions[2].height = 25
+            ws.row_dimensions[3].height = 25
+
+            ws.merge_cells('B1:D3')
+            cell_title = ws['B1']
+            cell_title.value = titulo_encabezado
+            cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
+            cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+            # Inserción segura de Logo Cliente
+            if logo_cliente_url:
+                try:
+                    clean_path = logo_cliente_url.lstrip('/')
+                    path_full_cliente = os.path.normpath(os.path.join(app.root_path, clean_path))
+                    if os.path.exists(path_full_cliente):
+                        img_cliente = openpyxl_image.Image(path_full_cliente)
+                        img_cliente.width = 100
+                        img_cliente.height = 50
+                        ws.add_image(img_cliente, 'A1')
+                except Exception as e:
+                    print(f"⚠️ Alerta Logo Cliente: {e}")
+
+            # Inserción segura de Logo GCTI
+            if os.path.exists(path_logo_gcti):
+                try:
+                    img_gcti = openpyxl_image.Image(path_logo_gcti)
+                    img_gcti.width = 100
+                    img_gcti.height = 50
+                    ws.add_image(img_gcti, 'E1')
+                except Exception as e:
+                    print(f"⚠️ Alerta Logo GCTI: {e}")
+
+            ws.row_dimensions[4].height = 10
+            ws.row_dimensions[5].height = 22
+
+            headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
+            ws.append([])  # Fila 4 libre
+            ws.append(headers)  # Fila 5
+
+            for col_num in range(1, 6):
+                cell = ws.cell(row=5, column=col_num)
+                cell.fill = fill_encabezado
+                cell.font = font_encabezado
+                cell.alignment = alineacion_centro if col_num > 1 else alineacion_izquierda
+
+            valores_por_colab = {}
+            cats_ids_grupo = [s['id'] for s in lista_subcats]
+            
+            if colab_ids_list:
+                registros_valores = db.query(ValorDemografico).filter(
+                    ValorDemografico.colaborador_id.in_(colab_ids_list),
+                    ValorDemografico.categoria_id.in_(cats_ids_grupo)
+                ).all()
+                for rv in registros_valores:
+                    if rv.colaborador_id not in valores_por_colab:
+                        valores_por_colab[rv.colaborador_id] = {}
+                    valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
+
+            def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
+                if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
+                    return
+
+                subcat_actual = lista_subcats[subcat_idx]
+                cat_id_curr = subcat_actual['id']
+                nivel_curr = subcat_actual['nivel']
+
+                agrupados = {}
+                for colab_id in colabs_subconjunto:
+                    val = valores_por_colab.get(colab_id, {}).get(cat_id_curr)
+                    if val and str(val).strip() and str(val).lower() != 'nan':
+                        val_str = str(val).strip()
+                        if val_str not in agrupados:
+                            agrupados[val_str] = []
+                        agrupados[val_str].append(colab_id)
+
+                for val_nombre, ids_hijos in agrupados.items():
+                    b2 = float(len(ids_hijos))
+                    c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
+
+                    if 0 < c2 < 5:
+                        row_data = [val_nombre, int(b2), '-', '-', '-']
                     else:
-                        cell.font = Font(name='Century Gothic', size=10)
-                        cell.alignment = alineacion_centro
+                        pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
+                        margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
+                        margen_str = f'{margen}%' if margen != '-' else '-'
+                        pct_str = f'{pct}%'
+                        row_data = [val_nombre, int(b2), int(c2), pct_str, margen_str]
 
-                procesar_nivel_recursivo(ids_hijos, subcat_idx + 1)
+                    ws.append(row_data)
+                    row_idx = ws.max_row
 
-        procesar_nivel_recursivo(colab_ids_list, 0)
+                    color_hex = COLORES_NIVELES.get(nivel_curr, '000000')
+                    font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_curr <= 3), color=color_hex)
+                    alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_curr - 1))
 
-        # Ajuste ancho de columnas
-        for col in ws.columns:
-            max_len = max(len(str(cell.value or '')) for cell in col)
-            col_letter = openpyxl.utils.get_column_letter(col[0].column)
-            ws.column_dimensions[col_letter].width = max(max_len + 8, 22)
+                    for col_idx in range(1, 6):
+                        cell = ws.cell(row=row_idx, column=col_idx)
+                        cell.border = borde_celda
+                        if col_idx == 1:
+                            cell.font = font_nivel
+                            cell.alignment = alineacion_sangria
+                        else:
+                            cell.font = Font(name='Century Gothic', size=10)
+                            cell.alignment = alineacion_centro
 
-    db.close()
+                    procesar_nivel_recursivo(ids_hijos, subcat_idx + 1)
+
+            procesar_nivel_recursivo(colab_ids_list, 0)
+
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                col_letter = openpyxl.utils.get_column_letter(col[0].column)
+                ws.column_dimensions[col_letter].width = max(max_len + 8, 22)
+
+    finally:
+        db.close()
 
     output = io.BytesIO()
     wb.save(output)
