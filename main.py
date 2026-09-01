@@ -951,17 +951,16 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             ws.row_dimensions[3].height = 20
             ws.row_dimensions[4].height = 12
 
-            # 5. Configurar celda A1:A3 para Logo GCTI, B1:D3 para Título y E1:E3 para Logo Cliente
-            ws.merge_cells('A1:A3')
-            ws.merge_cells('B1:D3')
+            # 5. Combinar A1:D3 para Título + Logo GCTI, y E1:E3 para Logo del Cliente
+            ws.merge_cells('A1:D3')
             ws.merge_cells('E1:E3')
 
-            cell_title = ws['B1']
+            cell_title = ws['A1']
             cell_title.value = titulo_encabezado
             cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
             cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-            # A) Insertar Logo de GCTI a la IZQUIERDA en A1
+            # A) Logo de GCTI en A1 (Extremo Izquierdo sobre la celda combinada A1:D3)
             if os.path.exists(path_logo_gcti):
                 try:
                     img_gcti = OpenpyxlImage(path_logo_gcti)
@@ -971,9 +970,12 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            # B) Insertar Logo del Cliente a la DERECHA en E1
+            # B) Logo del Cliente en E1 (Extremo Derecho)
             if logo_url_cliente:
-                path_logo_cli = os.path.join(app.root_path, logo_url_cliente.lstrip('/'))
+                # Limpiar ruta relativa para encontrar la imagen en el disco de Render/Flask
+                ruta_limpia = logo_url_cliente.replace('/static/', '') if logo_url_cliente.startswith('/static/') else logo_url_cliente.lstrip('/')
+                path_logo_cli = os.path.join(app.root_path, 'static', ruta_limpia) if not ruta_limpia.startswith('static') else os.path.join(app.root_path, ruta_limpia)
+
                 if os.path.exists(path_logo_cli):
                     try:
                         img_cli = OpenpyxlImage(path_logo_cli)
@@ -982,6 +984,8 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                         ws.add_image(img_cli, 'E1')
                     except Exception as e:
                         print(f"⚠️ Alerta Logo Cliente: {e}")
+                else:
+                    print(f"⚠️ No se encontró el archivo del logo en la ruta: {path_logo_cli}")
 
             # 6. Fila 5: Encabezados de Tabla (Barra Negra)
             ws.row_dimensions[5].height = 24
