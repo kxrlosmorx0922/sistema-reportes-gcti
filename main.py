@@ -8,8 +8,6 @@ import smtplib
 import math
 import io
 import openpyxl
-import locale
-import openpyxl.drawing.image as openpyxl_image
 from werkzeug.utils import secure_filename
 from datetime import datetime
 from email.mime.text import MIMEText
@@ -59,7 +57,6 @@ def cargar_logo_empresa():
             filepath = os.path.join(UPLOAD_FOLDER, filename)
             archivo.save(filepath)
 
-            # Guardar la ruta relativa en Neon
             tabla_real = Empresa.__table__.name
             db.execute(
                 text(f"UPDATE {tabla_real} SET logo_url = :url WHERE id = :id"),
@@ -522,7 +519,7 @@ def conmutar_estado(empresa_id):
     return redirect('/admin')
 
 # =================================================================
-# 📥 PASO 2: CARGAR BASE DE COLABORADORES (ESTRUCTURA RÍGIDA A, B, C)
+# 📥 PASO 2: CARGAR BASE DE COLABORADORES
 # =================================================================
 @app.route('/admin/cargar-colaboradores', methods=['POST'])
 def cargar_colaboradores():
@@ -541,7 +538,6 @@ def cargar_colaboradores():
         empresa_id = int(empresa_id_raw)
         nombre_archivo = archivo.filename.lower()
         
-        # 1. Lectura de Excel o CSV
         if nombre_archivo.endswith('.csv'):
             try:
                 df = pd.read_csv(archivo, encoding='utf-8')
@@ -554,15 +550,12 @@ def cargar_colaboradores():
         df = df.where(pd.notnull(df), None)
         columnas_originales = df.columns.tolist()
         
-        # 2. ESTRUCTURA RÍGIDA ESTÁNDAR (Pila fija de 3 columnas iniciales)
         col_id_name = columnas_originales[0]      # Columna A: Identificación
         col_nombre_name = columnas_originales[1]  # Columna B: Nombre
         col_email_name = columnas_originales[2]   # Columna C: E-Mail
         
-        # Columna D en adelante: Demografías analíticas
         columnas_demograficas = columnas_originales[3:]
 
-        # 3. Limpieza de datos previos en Neon para esta empresa
         colab_ids = [c[0] for c in db.query(Colaborador.id).filter(Colaborador.empresa_id == empresa_id).all()]
         if colab_ids:
             db.query(ValorDemografico).filter(ValorDemografico.colaborador_id.in_(colab_ids)).delete(synchronize_session=False)
@@ -572,7 +565,6 @@ def cargar_colaboradores():
         db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).delete(synchronize_session=False)
         db.commit()
 
-        # 4. Inserción masiva de Categorías Demográficas (Columna D+)
         categorias_dicts = [{'nombre': str(col_demog).strip(), 'empresa_id': empresa_id} for col_demog in columnas_demograficas]
         db.bulk_insert_mappings(CategoriaDemografica, categorias_dicts)
         db.commit()
@@ -580,7 +572,6 @@ def cargar_colaboradores():
         cats_db = db.query(CategoriaDemografica).filter(CategoriaDemografica.empresa_id == empresa_id).all()
         mapa_categorias = {cat.nombre: cat.id for cat in cats_db}
 
-        # 5. Inserción masiva de Colaboradores (Lectura A, B, C)
         colaboradores_dicts = []
         for index, fila in df.iterrows():
             id_raw = fila[col_id_name]
@@ -603,7 +594,6 @@ def cargar_colaboradores():
         db.bulk_insert_mappings(Colaborador, colaboradores_dicts)
         db.commit()
 
-        # 6. Inserción masiva de Valores Demográficos (Cruza por Columna C / E-Mail)
         colabs_db = db.query(Colaborador.id, Colaborador.email).filter(Colaborador.empresa_id == empresa_id).all()
         mapa_colaboradores_by_email = {c.email.strip().lower(): c.id for c in colabs_db if c.email}
         
@@ -644,7 +634,7 @@ def cargar_colaboradores():
     return redirect('/admin')
 
 # =================================================================
-# 📊 PASO 3: CARGAR PARTICIPACIÓN (LEE COLUMNA A)
+# 📊 PASO 3: CARGAR PARTICIPACIÓN
 # =================================================================
 @app.route('/admin/cargar-participacion', methods=['POST'])
 def cargar_participacion():
@@ -867,23 +857,18 @@ def progreso_global():
     finally:
         db.close()
 
+# =================================================================
+# 📊 GENERADOR USANDO EXCLUSIVAMENTE LA PLANTILLA 'plantilla_reporte.xlsx'
+# =================================================================
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     db = SessionLocal()
     
-    # 1. Cargar la plantilla fija pré-diseñada
     path_plantilla = os.path.join(app.root_path, 'static', 'plantilla_reporte.xlsx')
     
-    if os.path.exists(path_plantilla):
-        wb = openpyxl.load_workbook(path_plantilla)
-        ws_base = wb.active
-    else:
-        wb = openpyxl.Workbook()
-        ws_base = wb.active
-
     empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
     nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
 
-    # Texto en dos líneas para A1 (A1:D3 combinadas en la plantilla)
+    # Texto exacto para A1 (A1:D3 combinadas)
     meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     hoy = datetime.now()
     fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
@@ -901,7 +886,6 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     borde_fino = Side(border_style='thin', color='D9D9D9')
     borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-    # Normalización de IDs seleccionados
     ids_limpios = []
     for cid in categorias_ids_seleccionadas:
         try:
@@ -932,24 +916,30 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     colab_ids_list = [c[0] for c in colabs_db]
     participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
 
-    # Copiar plantilla y escribir los datos a partir de la fila 6
+    wb_final = openpyxl.Workbook()
+    wb_final.remove(wb_final.active) # Quitar hoja vacía inicial
+
+    # Iterar cada categoría seleccionada recargando la plantilla directamente
     for nombre_grupo, lista_subcats in grupos_categorias.items():
         lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
         nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
         
-        ws = wb.copy_worksheet(ws_base)
+        # Cargar copia limpia directa desde el archivo físico sin clonar en memoria (Evita error #VALUE!)
+        wb_plantilla_temp = openpyxl.load_workbook(path_plantilla)
+        ws = wb_plantilla_temp.active
         ws.title = nombre_hoja
+
         ws.views.sheetView[0].showGridLines = False
 
-        # Actualizar celda de título A1
+        # 1. Escribir únicamente el texto dinámico en A1 respetando el diseño
         ws['A1'].value = titulo_encabezado
         ws['A1'].font = Font(name='Century Gothic', size=11, bold=True, color='000000')
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-        # Nombre dinámico en el primer encabezado de la fila 5
+        # 2. Nombre de la categoría en el encabezado de la fila 5
         ws.cell(row=5, column=1, value=nombre_grupo)
 
-        # Cargar mapeo de datos
+        # 3. Cargar datos demográficos
         valores_por_colab = {}
         cats_ids_grupo = [s['id'] for s in lista_subcats]
         
@@ -963,7 +953,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                     valores_por_colab[rv.colaborador_id] = {}
                 valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
 
-        # POBLAR DATOS DESDE LA FILA 6
+        # 4. POBLAR DATOS ESTRICTAMENTE DESDE LA FILA 6
         def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
             if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
                 return
@@ -1016,17 +1006,19 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
         procesar_nivel_recursivo(colab_ids_list, 0)
 
-    # Eliminar hoja molde
-    if len(wb.sheetnames) > 1:
-        wb.remove(ws_base)
+        # Mover la hoja procesada al libro consolidado
+        wb_final._add_sheet(ws)
 
     db.close()
 
     output = io.BytesIO()
-    wb.save(output)
+    wb_final.save(output)
     output.seek(0)
     return output
 
+# =================================================================
+# 📥 ENDPOINTS DE DESCARGA Y ENVÍO POR EMAIL
+# =================================================================
 @app.route('/admin/descargar-reporte-excel', methods=['POST'])
 def descargar_reporte_excel():
     if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
@@ -1046,7 +1038,7 @@ def descargar_reporte_excel():
         nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
         db.close()
 
-        # Nombre de archivo dinámico
+        # Nomenclatura oficial requerida
         hoy_str = datetime.now().strftime("%d_%m_%Y")
         nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participación {hoy_str}.xlsx"
 
@@ -1083,7 +1075,6 @@ def enviar_reporte_email():
     excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
     excel_stream.seek(0)
 
-    # Nombre de archivo dinámico para el correo
     hoy_str = datetime.now().strftime("%d_%m_%Y")
     nombre_archivo = f"{nombre_empresa} - GCTI Reporte de participación {hoy_str}.xlsx"
 
