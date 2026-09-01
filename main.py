@@ -979,13 +979,18 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
             # B) Insertar Logo del Cliente en E1
             if logo_url_cliente:
-                # Extraer solo el nombre del archivo
-                filename_logo = os.path.basename(logo_url_cliente)
+                nombre_archivo_logo = os.path.basename(logo_url_cliente)
                 
-                # Construir la ruta absoluta usando la carpeta oficial
-                path_logo_cli = os.path.join(UPLOAD_FOLDER, filename_logo)
+                # Evaluación multiruta de seguridad
+                rutas_de_busqueda = [
+                    os.path.join(UPLOAD_FOLDER, nombre_archivo_logo),
+                    os.path.join(app.root_path, 'static', 'logos_empresas', nombre_archivo_logo),
+                    os.path.join(app.root_path, logo_url_cliente.lstrip('/'))
+                ]
+                
+                path_logo_cli = next((r for r in rutas_de_busqueda if os.path.exists(r)), None)
 
-                if os.path.exists(path_logo_cli):
+                if path_logo_cli:
                     try:
                         img_cli = OpenpyxlImage(path_logo_cli)
                         img_cli.width = 110
@@ -994,7 +999,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                     except Exception as e:
                         print(f"⚠️ Alerta Logo Cliente: {e}")
                 else:
-                    print(f"⚠️ No se encontró la imagen en disco: {path_logo_cli}")
+                    print(f"⚠️ No se encontró la imagen en el servidor: {nombre_archivo_logo}")
 
             # 6. Fila 5: Encabezados de Tabla (Barra Negra)
             ws.row_dimensions[5].height = 24
