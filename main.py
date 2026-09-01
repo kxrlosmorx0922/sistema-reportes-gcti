@@ -1029,7 +1029,6 @@ def enviar_reporte_email():
     excel_stream = generar_excel_multihoja_gcti(empresa_id, categorias_ids)
     excel_stream.seek(0)
 
-    # Remitente autorizado
     remitente_autenticado = 'carlos.mora@peoplesvoice.co'
     nombre_remitente = session.get('nombre', 'Portal GCTI®')
 
@@ -1069,13 +1068,13 @@ def enviar_reporte_email():
     msg.attach(parte_adjunto)
 
     try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        # CAMBIO CLAVE: Usar SMTP_SSL en puerto 465 (sin bloqueo de red en Render)
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(remitente_autenticado, 'hxhjkhqleflgvmoo')
         recipients = [destinatario_principal, copia_cc]
         server.sendmail(remitente_autenticado, recipients, msg.as_string())
         server.quit()
-        return jsonify({'success': True, 'mensaje': f'📧 Reporte de {nombre_empresa} enviado exitosamente a {destinatario_principal} con copia a {copia_cc}.'})
+        return jsonify({'success': True, 'mensaje': f'📧 Reporte de {nombre_empresa} enviado exitosamente por correo.'})
     except Exception as e:
         print(f"❌ Error SMTP: {str(e)}")
         return jsonify({'error': f'Falló el envío por correo electrónico: {str(e)}'}), 500
