@@ -8,6 +8,9 @@ import smtplib
 import math
 import io
 import openpyxl
+import locale
+import openpyxl.drawing.image as openpyxl_image
+from werkzeug.utils import secure_filename
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -28,6 +31,51 @@ print("2. 📚 Librerías importadas correctamente...") # <-- Rastreo 2
 
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_super_segura_para_sesiones'
+
+# Configuración de carpeta de subidas de logos
+UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'logos_empresas')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/admin/cargar-logo-empresa', methods=['POST'])
+def cargar_logo_empresa():
+    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
+        return redirect('/login')
+
+    empresa_id = request.form.get('empresa_id')
+    archivo = request.files.get('logo_cliente')
+
+    if not empresa_id or not archivo or archivo.filename == '':
+        flash("⚠️ Por favor seleccione la empresa y una imagen válida.", "warning")
+        return redirect('/admin')
+
+    if archivo and allowed_file(archivo.filename):
+        db = SessionLocal()
+        try:
+            filename = secure_filename(f"logo_empresa_{empresa_id}_{archivo.filename}")
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            archivo.save(filepath)
+
+            # Guardar la ruta relativa en Neon
+            tabla_real = Empresa.__table__.name
+            db.execute(
+                text(f"UPDATE {tabla_real} SET logo_url = :url WHERE id = :id"),
+                {"url": f"/static/logos_empresas/{filename}", "id": int(empresa_id)}
+            )
+            db.commit()
+            flash("🎨 Logo de la organización actualizado con éxito.", "success")
+        except Exception as e:
+            db.rollback()
+            flash(f"❌ Error al guardar la imagen: {str(e)}", "danger")
+        finally:
+            db.close()
+    else:
+        flash("⚠️ Formato de imagen no permitido (Use PNG, JPG o JPEG).", "warning")
+
+    return redirect('/admin')
 
 # =================================================================
 # 📅 MOTOR 1: INTEGRACIÓN CON GOOGLE CALENDAR API (CREAR Y BORRAR)
@@ -823,25 +871,31 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     wb.remove(wb.active)
 
     db = SessionLocal()
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    nombre_empresa = empresa.nombre if empresa else 'Organización'
+    logo_cliente_url = empresa.logo_url if empresa else None
+
+    # Fecha actual formateada (ej: 01 de septiembre de 2026)
+    meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+    hoy = datetime.now()
+    fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
+    titulo_encabezado = f"Great Culture to Innovate México - Reporte de Participación {fecha_formateada}"
 
     COLORES_NIVELES = {
-        1: 'C00000',  # Rojo
-        2: '0000FF',  # Azul
-        3: '70AD47',  # Verde
-        4: 'C65911',  # Naranja
-        5: '7030A0',  # Púrpura
-        6: 'A6A6A6',  # Gris
-        7: '000000'   # Negro
+        1: 'C00000', 2: '0000FF', 3: '70AD47', 4: 'C65911', 5: '7030A0', 6: 'A6A6A6', 7: '000000'
     }
 
     fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
     font_encabezado = Font(name='Century Gothic', size=11, bold=True, color='FFFFFF')
-    alineacion_centro = Alignment(horizontal='center', vertical='center')
+    alineacion_centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
     alineacion_izquierda = Alignment(horizontal='left', vertical='center')
     borde_fino = Side(border_style='thin', color='D9D9D9')
     borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
-    # 1. Clasificar categorías seleccionadas por su nombre raíz
+    # Identificar ruta del logo de GCTI por defecto
+    path_logo_gcti = os.path.join(app.root_path, 'static', 'logo_gcti.png')
+
+    # Agrupar categorías seleccionadas
     grupos_categorias = {}
     for cat_id in categorias_ids_seleccionadas:
         try:
@@ -864,34 +918,72 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         if nombre_base not in grupos_categorias:
             grupos_categorias[nombre_base] = []
 
-        grupos_categorias[nombre_base].append({
-            'id': cat_obj.id,
-            'nombre_original': cat_obj.nombre,
-            'nivel': nivel_num
-        })
+        grupos_categorias[nombre_base].append({'id': cat_obj.id, 'nombre_original': cat_obj.nombre, 'nivel': nivel_num})
 
-    # 2. Cargar colaboraciones y participaciones para realizar el cruce multinivel
     colabs_db = db.query(Colaborador.id).filter(Colaborador.empresa_id == empresa_id).all()
     colab_ids_list = [c[0] for c in colabs_db]
-
     participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
 
     for nombre_grupo, lista_subcats in grupos_categorias.items():
         lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
-        
         nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
         ws = wb.create_sheet(title=nombre_hoja)
 
+        # -------------------------------------------------------------
+        # BLOQUE SUPERIOR DE ENCABEZADO (FILAS 1 A 3)
+        # -------------------------------------------------------------
+        ws.row_dimensions[1].height = 25
+        ws.row_dimensions[2].height = 25
+        ws.row_dimensions[3].height = 25
+
+        # Título centrado combinado de B1 a D3
+        ws.merge_cells('B1:D3')
+        cell_title = ws['B1']
+        cell_title.value = titulo_encabezado
+        cell_title.font = Font(name='Century Gothic', size=13, bold=True, color='000000')
+        cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        # Insertar Logo Cliente en A1
+        if logo_cliente_url:
+            path_relativo = logo_cliente_url.lstrip('/')
+            path_full_cliente = os.path.join(app.root_path, path_relativo)
+            if os.path.exists(path_full_cliente):
+                try:
+                    img_cliente = openpyxl_image.Image(path_full_cliente)
+                    img_cliente.width = 110
+                    img_cliente.height = 55
+                    ws.add_image(img_cliente, 'A1')
+                except Exception as e:
+                    print(f"⚠️ No se pudo insertar logo cliente: {e}")
+
+        # Insertar Logo GCTI en E1
+        if os.path.exists(path_logo_gcti):
+            try:
+                img_gcti = openpyxl_image.Image(path_logo_gcti)
+                img_gcti.width = 110
+                img_gcti.height = 55
+                ws.add_image(img_gcti, 'E1')
+            except Exception as e:
+                print(f"⚠️ No se pudo insertar logo GCTI: {e}")
+
+        # Fila 4: Espacio separador en blanco
+        ws.row_dimensions[4].height = 10
+
+        # -------------------------------------------------------------
+        # FILA 5: ENCABEZADOS DE TABLA (FILA 5 EN LUGAR DE FILA 1)
+        # -------------------------------------------------------------
+        ws.row_dimensions[5].height = 22
         headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
-        ws.append(headers)
+        ws.append([])  # Fila 4 vacía
+        ws.append(headers)  # Fila 5 headers
 
         for col_num in range(1, 6):
-            cell = ws.cell(row=1, column=col_num)
+            cell = ws.cell(row=5, column=col_num)
             cell.fill = fill_encabezado
             cell.font = font_encabezado
             cell.alignment = alineacion_centro if col_num > 1 else alineacion_izquierda
 
-        # Mapeo de valores por colaborador: {colaborador_id: {cat_id: valor}}
+        # Cargar valores demográficos
         valores_por_colab = {}
         cats_ids_grupo = [s['id'] for s in lista_subcats]
         
@@ -900,13 +992,12 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 ValorDemografico.colaborador_id.in_(colab_ids_list),
                 ValorDemografico.categoria_id.in_(cats_ids_grupo)
             ).all()
-
             for rv in registros_valores:
                 if rv.colaborador_id not in valores_por_colab:
                     valores_por_colab[rv.colaborador_id] = {}
                 valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
 
-        # Función recursiva para construir el árbol e insertar en orden Padre -> Hijos
+        # Procesar árbol jerárquico
         def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
             if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
                 return
@@ -915,7 +1006,6 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             cat_id_curr = subcat_actual['id']
             nivel_curr = subcat_actual['nivel']
 
-            # Agrupar colaboradores del subconjunto por el valor en este nivel
             agrupados = {}
             for colab_id in colabs_subconjunto:
                 val = valores_por_colab.get(colab_id, {}).get(cat_id_curr)
@@ -925,7 +1015,6 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                         agrupados[val_str] = []
                     agrupados[val_str].append(colab_id)
 
-            # Escribir cada grupo del nivel actual y procesar inmediatamente a sus hijos
             for val_nombre, ids_hijos in agrupados.items():
                 b2 = float(len(ids_hijos))
                 c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
@@ -942,7 +1031,6 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 ws.append(row_data)
                 row_idx = ws.max_row
 
-                # Formatos de texto, sangría y color según el nivel exacto
                 color_hex = COLORES_NIVELES.get(nivel_curr, '000000')
                 font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_curr <= 3), color=color_hex)
                 alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_curr - 1))
@@ -957,13 +1045,11 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                         cell.font = Font(name='Century Gothic', size=10)
                         cell.alignment = alineacion_centro
 
-                # Llamada recursiva para colgar las subáreas hijas inmediatamente debajo
                 procesar_nivel_recursivo(ids_hijos, subcat_idx + 1)
 
-        # Iniciar el árbol con toda la población
         procesar_nivel_recursivo(colab_ids_list, 0)
 
-        # Autoajuste de columnas
+        # Ajuste ancho de columnas
         for col in ws.columns:
             max_len = max(len(str(cell.value or '')) for cell in col)
             col_letter = openpyxl.utils.get_column_letter(col[0].column)
