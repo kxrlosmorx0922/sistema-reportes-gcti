@@ -871,10 +871,10 @@ def progreso_global():
 
 def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # Elimina la hoja en blanco por defecto
-    
+    wb.remove(wb.active)  # Elimina la hoja predeterminada en blanco
+
     db = SessionLocal()
-    
+
     try:
         tabla_real = Empresa.__table__.name
         emp_res = db.execute(text(f"SELECT nombre, logo_url FROM {tabla_real} WHERE id = :id"), {"id": int(empresa_id)}).fetchone()
@@ -882,27 +882,27 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
         nombre_empresa = emp_res[0].strip() if emp_res and emp_res[0] else 'Organización'
         logo_url_cliente = emp_res[1] if emp_res and len(emp_res) > 1 else None
 
-        # Fecha actual formateada y título en 2 líneas
+        # Fecha actual formateada y título a 2 líneas
         meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
         hoy = datetime.now()
         fecha_formateada = f"{hoy.day:02d} de {meses_es[hoy.month - 1]} de {hoy.year}"
         titulo_encabezado = f"Great Culture to Innovate México - Reporte de Participación {fecha_formateada}\n{nombre_empresa}"
 
-        COLORES_NIVELES = {
-            1: 'C00000', 2: '0000FF', 3: '70AD47', 4: 'C65911', 5: '7030A0', 6: 'A6A6A6', 7: '000000'
-        }
-
         fill_encabezado = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
         font_encabezado = Font(name='Century Gothic', size=10, bold=True, color='FFFFFF')
+        font_datos = Font(name='Century Gothic', size=10)
+        font_opcion = Font(name='Century Gothic', size=10, bold=True, color='000000')
+
         alineacion_centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
         alineacion_izquierda = Alignment(horizontal='left', vertical='center')
-        
+
         borde_fino = Side(border_style='thin', color='D9D9D9')
         borde_celda = Border(left=borde_fino, right=borde_fino, top=borde_fino, bottom=borde_fino)
 
         # Ruta del logo de GCTI por defecto
         path_logo_gcti = os.path.join(app.root_path, 'static', 'logo_gcti.png')
 
+        # Normalizar IDs seleccionados
         ids_limpios = []
         for cid in categorias_ids_seleccionadas:
             try:
@@ -910,39 +910,25 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             except (ValueError, TypeError):
                 continue
 
-        grupos_categorias = {}
-        for cat_id_int in ids_limpios:
-            cat_obj = db.query(CategoriaDemografica).filter(
-                CategoriaDemografica.id == cat_id_int,
-                CategoriaDemografica.empresa_id == int(empresa_id)
-            ).first()
-
-            if not cat_obj:
-                continue
-
-            nombre_base = re.sub(r'\s+\d+$', '', cat_obj.nombre).strip()
-            match_nivel = re.search(r'(\d+)$', cat_obj.nombre)
-            nivel_num = int(match_nivel.group(1)) if match_nivel else 1
-
-            if nombre_base not in grupos_categorias:
-                grupos_categorias[nombre_base] = []
-
-            grupos_categorias[nombre_base].append({'id': cat_obj.id, 'nombre_original': cat_obj.nombre, 'nivel': nivel_num})
+        # Consultar las categorías individuales seleccionadas
+        categorias_objetivos = db.query(CategoriaDemografica).filter(
+            CategoriaDemografica.id.in_(ids_limpios),
+            CategoriaDemografica.empresa_id == int(empresa_id)
+        ).all()
 
         colabs_db = db.query(Colaborador.id).filter(Colaborador.empresa_id == int(empresa_id)).all()
         colab_ids_list = [c[0] for c in colabs_db]
         participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
 
-        for nombre_grupo, lista_subcats in grupos_categorias.items():
-            lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
-            nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
-            
+        # CREACIÓN DE UNA HOJA INDEPENDIENTE POR CADA CATEGORÍA / NIVEL
+        for cat_obj in categorias_objetivos:
+            nombre_hoja = str(cat_obj.nombre).replace('/', '-').replace('\\', '-')[:30]
             ws = wb.create_sheet(title=nombre_hoja)
 
             # 1. Quitar cuadrícula de fondo
             ws.views.sheetView[0].showGridLines = False
 
-            # 2. INMOVILIZAR LAS PRIMERAS 5 FILAS (Título + Encabezados)
+            # 2. INMOVILIZAR LAS PRIMERAS 5 FILAS
             ws.freeze_panes = 'A6'
 
             # 3. Anchos fijos de columnas
@@ -952,13 +938,13 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             ws.column_dimensions['D'].width = 25
             ws.column_dimensions['E'].width = 25
 
-            # 4. Alturas de filas iniciales
+            # 4. Alturas de filas de encabezado
             ws.row_dimensions[1].height = 20
             ws.row_dimensions[2].height = 20
             ws.row_dimensions[3].height = 20
             ws.row_dimensions[4].height = 12
 
-            # 5. ESTRUCTURA UNIFICADA A1:D3 PARA TÍTULO + LOGO GCTI, Y E1:E3 PARA LOGO DEL CLIENTE
+            # 5. ENCABEZADO SUPERIOR
             ws.merge_cells('A1:D3')
             ws.merge_cells('E1:E3')
 
@@ -967,7 +953,7 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
             cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-            # A) Insertar Logo GCTI en A1 (Alineado en el área combinada A1:D3)
+            # Insertar Logo GCTI en A1
             if os.path.exists(path_logo_gcti):
                 try:
                     img_gcti = OpenpyxlImage(path_logo_gcti)
@@ -977,17 +963,14 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            # B) Insertar Logo del Cliente en E1
+            # Insertar Logo del Cliente en E1 (si aplica)
             if logo_url_cliente:
                 nombre_archivo_logo = os.path.basename(logo_url_cliente)
-                
-                # Evaluación multiruta de seguridad
                 rutas_de_busqueda = [
                     os.path.join(UPLOAD_FOLDER, nombre_archivo_logo),
                     os.path.join(app.root_path, 'static', 'logos_empresas', nombre_archivo_logo),
                     os.path.join(app.root_path, logo_url_cliente.lstrip('/'))
                 ]
-                
                 path_logo_cli = next((r for r in rutas_de_busqueda if os.path.exists(r)), None)
 
                 if path_logo_cli:
@@ -998,12 +981,10 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                         ws.add_image(img_cli, 'E1')
                     except Exception as e:
                         print(f"⚠️ Alerta Logo Cliente: {e}")
-                else:
-                    print(f"⚠️ No se encontró la imagen en el servidor: {nombre_archivo_logo}")
 
-            # 6. Fila 5: Encabezados de Tabla (Barra Negra)
+            # 6. Fila 5: BARRA NEGRA DE ENCABEZADOS DE TABLA
             ws.row_dimensions[5].height = 24
-            headers = [nombre_grupo, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
+            headers = [cat_obj.nombre, 'Población objetivo', 'Encuestas recibidas', '(%) avance', 'Margen de error (%)']
 
             for col_idx, text_header in enumerate(headers, 1):
                 cell = ws.cell(row=5, column=col_idx, value=text_header)
@@ -1011,74 +992,51 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 cell.font = font_encabezado
                 cell.alignment = alineacion_centro if col_idx > 1 else alineacion_izquierda
 
-            # 7. Cargar datos demográficos
-            valores_por_colab = {}
-            cats_ids_grupo = [s['id'] for s in lista_subcats]
-            
-            if colab_ids_list:
-                registros_valores = db.query(ValorDemografico).filter(
-                    ValorDemografico.colaborador_id.in_(colab_ids_list),
-                    ValorDemografico.categoria_id.in_(cats_ids_grupo)
+            # 7. Cargar valores de la categoría actual
+            registros = db.query(ValorDemografico.valor, Colaborador.id)\
+                .join(Colaborador, ValorDemografico.colaborador_id == Colaborador.id)\
+                .filter(
+                    ValorDemografico.categoria_id == cat_obj.id,
+                    Colaborador.empresa_id == int(empresa_id)
                 ).all()
-                for rv in registros_valores:
-                    if rv.colaborador_id not in valores_por_colab:
-                        valores_por_colab[rv.colaborador_id] = {}
-                    valores_por_colab[rv.colaborador_id][rv.categoria_id] = rv.valor
 
-            # 8. Poblado de Datos (Árbol Jerárquico desde Fila 6)
-            def procesar_nivel_recursivo(colabs_subconjunto, subcat_idx):
-                if subcat_idx >= len(lista_subcats) or not colabs_subconjunto:
-                    return
+            agrupados = {}
+            for val, colab_id in registros:
+                if val and str(val).strip() and str(val).lower() != 'nan':
+                    val_str = str(val).strip()
+                    if val_str not in agrupados:
+                        agrupados[val_str] = []
+                    agrupados[val_str].append(colab_id)
 
-                subcat_actual = lista_subcats[subcat_idx]
-                cat_id_curr = subcat_actual['id']
-                nivel_curr = subcat_actual['nivel']
+            # 8. POBLADO DE FILAS INDEPENDIENTES
+            for val_nombre, ids_hijos in agrupados.items():
+                b2 = float(len(ids_hijos))  # Población Objetivo
+                c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
 
-                agrupados = {}
-                for colab_id in colabs_subconjunto:
-                    val = valores_por_colab.get(colab_id, {}).get(cat_id_curr)
-                    if val and str(val).strip() and str(val).lower() != 'nan':
-                        val_str = str(val).strip()
-                        if val_str not in agrupados:
-                            agrupados[val_str] = []
-                        agrupados[val_str].append(colab_id)
+                # Regla de Confidencialidad por Población Objetivo (b2 < 3)
+                if b2 < 3:
+                    row_data = [val_nombre, int(b2), '-', '-', '-']
+                else:
+                    pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
+                    margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
+                    
+                    margen_str = f'{margen}%' if margen != '-' else '-'
+                    pct_str = f'{pct}%'
+                    row_data = [val_nombre, int(b2), int(c2), pct_str, margen_str]
 
-                for val_nombre, ids_hijos in agrupados.items():
-                    b2 = float(len(ids_hijos))  # Población Objetivo (Columna B)
-                    c2 = float(sum(1 for cid in ids_hijos if cid in participaciones_set))
+                ws.append(row_data)
+                row_idx = ws.max_row
+                ws.row_dimensions[row_idx].height = 20
 
-                    # Regla estricta: Si Población Objetivo (b2) < 3 -> Siempre Guiones en C, D, E
-                    if b2 < 3:
-                        row_data = [val_nombre, int(b2), '-', '-', '-']
+                for col_idx in range(1, 6):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cell.border = borde_celda
+                    if col_idx == 1:
+                        cell.font = font_opcion
+                        cell.alignment = alineacion_izquierda
                     else:
-                        pct = round((c2 / b2) * 100, 1) if b2 > 0 else 0.0
-                        margen = '-' if c2 > b2 else (0.0 if (c2 == 0 or b2 <= 1) else calcular_margen_error(b2, c2))
-                        
-                        margen_str = f'{margen}%' if margen != '-' else '-'
-                        pct_str = f'{pct}%'
-                        row_data = [val_nombre, int(b2), int(c2), pct_str, margen_str]
-
-                    ws.append(row_data)
-                    row_idx = ws.max_row
-                    ws.row_dimensions[row_idx].height = 20
-
-                    color_hex = COLORES_NIVELES.get(nivel_curr, '000000')
-                    font_nivel = Font(name='Century Gothic', size=10, bold=(nivel_curr <= 3), color=color_hex)
-                    alineacion_sangria = Alignment(horizontal='left', vertical='center', indent=max(0, nivel_curr - 1))
-
-                    for col_idx in range(1, 6):
-                        cell = ws.cell(row=row_idx, column=col_idx)
-                        cell.border = borde_celda
-                        if col_idx == 1:
-                            cell.font = font_nivel
-                            cell.alignment = alineacion_sangria
-                        else:
-                            cell.font = Font(name='Century Gothic', size=10)
-                            cell.alignment = alineacion_centro
-
-                    procesar_nivel_recursivo(ids_hijos, subcat_idx + 1)
-
-            procesar_nivel_recursivo(colab_ids_list, 0)
+                        cell.font = font_datos
+                        cell.alignment = alineacion_centro
 
     finally:
         db.close()
