@@ -951,16 +951,20 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
             ws.row_dimensions[3].height = 20
             ws.row_dimensions[4].height = 12
 
-            # 5. Combinar A1:D3 para Título + Logo GCTI, y E1:E3 para Logo del Cliente
-            ws.merge_cells('A1:D3')
+            # 5. ESTRUCTURA PERFECTA DE ENCABEZADO
+            # A1:A3 para Logo GCTI (Izquierda)
+            # B1:D3 para Título Centrado
+            # E1:E3 para Logo del Cliente (Derecha)
+            ws.merge_cells('A1:A3')
+            ws.merge_cells('B1:D3')
             ws.merge_cells('E1:E3')
 
-            cell_title = ws['A1']
+            cell_title = ws['B1']
             cell_title.value = titulo_encabezado
             cell_title.font = Font(name='Century Gothic', size=11, bold=True, color='000000')
             cell_title.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-            # A) Logo de GCTI en A1 (Extremo Izquierdo sobre A1:D3)
+            # A) Insertar Logo GCTI en A1
             if os.path.exists(path_logo_gcti):
                 try:
                     img_gcti = OpenpyxlImage(path_logo_gcti)
@@ -970,11 +974,11 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            #B) Logo del Cliente en E1 (Extremo Derecho)
+            # B) Insertar Logo del Cliente en E1 (Búsqueda multiruta de seguridad)
             if logo_url_cliente:
                 nombre_archivo_logo = os.path.basename(logo_url_cliente)
                 path_logo_cli = os.path.join(app.root_path, 'static', 'logos_empresas', nombre_archivo_logo)
-            
+
                 if os.path.exists(path_logo_cli):
                     try:
                         img_cli = OpenpyxlImage(path_logo_cli)
@@ -1190,7 +1194,7 @@ def enviar_reporte_email():
         return jsonify({'success': True, 'mensaje': f'📧 Reporte de {nombre_empresa} enviado exitosamente por correo.'})
     except Exception as e:
         print(f"❌ Error SMTP: {str(e)}")
-        return jsonify({'error': f'Falló el envío por correo electrónico: {str(e)}'}), 500
+        return jsonify({'error': f'Falló the envío por correo electrónico: {str(e)}'}), 500
 
 print("5. Intentando encender el servidor Flask en el entorno de Render...")
 
