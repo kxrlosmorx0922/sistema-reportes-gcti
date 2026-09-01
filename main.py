@@ -970,12 +970,11 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            # B) Logo del Cliente en E1 (Extremo Derecho E1:E3)
+            #B) Logo del Cliente en E1 (Extremo Derecho)
             if logo_url_cliente:
-                # Corregir la ruta para que Python la encuentre en el disco de Render sin errores
                 nombre_archivo_logo = os.path.basename(logo_url_cliente)
-                path_logo_cli = os.path.join(UPLOAD_FOLDER, nombre_archivo_logo)
-
+                path_logo_cli = os.path.join(app.root_path, 'static', 'logos_empresas', nombre_archivo_logo)
+            
                 if os.path.exists(path_logo_cli):
                     try:
                         img_cli = OpenpyxlImage(path_logo_cli)
