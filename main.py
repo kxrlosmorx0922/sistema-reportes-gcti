@@ -865,6 +865,13 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     
     path_plantilla = os.path.join(app.root_path, 'static', 'plantilla_reporte.xlsx')
     
+    if os.path.exists(path_plantilla):
+        wb = openpyxl.load_workbook(path_plantilla)
+        ws_base = wb.active
+    else:
+        wb = openpyxl.Workbook()
+        ws_base = wb.active
+
     empresa = db.query(Empresa).filter(Empresa.id == int(empresa_id)).first()
     nombre_empresa = empresa.nombre.strip() if empresa else 'Organización'
 
@@ -916,17 +923,13 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
     colab_ids_list = [c[0] for c in colabs_db]
     participaciones_set = {p[0] for p in db.query(Participacion.colaborador_id).filter(Participacion.colaborador_id.in_(colab_ids_list)).all()} if colab_ids_list else set()
 
-    wb_final = openpyxl.Workbook()
-    wb_final.remove(wb_final.active) # Quitar hoja vacía inicial
-
-    # Iterar cada categoría seleccionada recargando la plantilla directamente
+    # Iterar cada categoría duplicando la hoja base conservando formato e imagen intactos
     for nombre_grupo, lista_subcats in grupos_categorias.items():
         lista_subcats = sorted(lista_subcats, key=lambda x: x['nivel'])
         nombre_hoja = str(nombre_grupo).replace('/', '-').replace('\\', '-')[:30]
         
-        # Cargar copia limpia directa desde el archivo físico sin clonar en memoria (Evita error #VALUE!)
-        wb_plantilla_temp = openpyxl.load_workbook(path_plantilla)
-        ws = wb_plantilla_temp.active
+        # Copiar hoja directamente dentro del mismo workbook
+        ws = wb.copy_worksheet(ws_base)
         ws.title = nombre_hoja
 
         ws.views.sheetView[0].showGridLines = False
@@ -1006,13 +1009,14 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
 
         procesar_nivel_recursivo(colab_ids_list, 0)
 
-        # Mover la hoja procesada al libro consolidado
-        wb_final._add_sheet(ws)
+    # Remover la pestaña plantilla base si se generaron pestañas con datos
+    if len(wb.sheetnames) > 1:
+        wb.remove(ws_base)
 
     db.close()
 
     output = io.BytesIO()
-    wb_final.save(output)
+    wb.save(output)
     output.seek(0)
     return output
 
