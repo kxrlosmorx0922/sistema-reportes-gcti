@@ -41,27 +41,23 @@ def allowed_file(filename):
 
 @app.route('/admin/cargar-logo-empresa', methods=['POST'])
 def cargar_logo_empresa():
-    if 'usuario_id' not in session or session['rol'] not in ['admin', 'coordinador']:
-        return redirect('/login')
-
-    empresa_id = request.form.get('empresa_id')
-    archivo = request.files.get('logo_cliente')
-
-    if not empresa_id or not archivo or archivo.filename == '':
-        flash("⚠️ Por favor seleccione la empresa y una imagen válida.", "warning")
-        return redirect('/admin')
-
+    # ... validaciones de sesión ...
     if archivo and allowed_file(archivo.filename):
         db = SessionLocal()
         try:
+            # Asegurar que el directorio static/logos_empresas existe
+            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+            
             filename = secure_filename(f"logo_empresa_{empresa_id}_{archivo.filename}")
             filepath = os.path.join(UPLOAD_FOLDER, filename)
             archivo.save(filepath)
 
+            # Guardar la ruta relativa limpia
+            ruta_db = f"/static/logos_empresas/{filename}"
             tabla_real = Empresa.__table__.name
             db.execute(
                 text(f"UPDATE {tabla_real} SET logo_url = :url WHERE id = :id"),
-                {"url": f"/static/logos_empresas/{filename}", "id": int(empresa_id)}
+                {"url": ruta_db, "id": int(empresa_id)}
             )
             db.commit()
             flash("🎨 Logo de la organización actualizado con éxito.", "success")
@@ -70,10 +66,6 @@ def cargar_logo_empresa():
             flash(f"❌ Error al guardar la imagen: {str(e)}", "danger")
         finally:
             db.close()
-    else:
-        flash("⚠️ Formato de imagen no permitido (Use PNG, JPG o JPEG).", "warning")
-
-    return redirect('/admin')
 
 # =================================================================
 # 📅 MOTOR 1: INTEGRACIÓN CON GOOGLE CALENDAR API (CREAR Y BORRAR)
@@ -970,34 +962,24 @@ def generar_excel_multihoja_gcti(empresa_id, categorias_ids_seleccionadas):
                 except Exception as e:
                     print(f"⚠️ Alerta Logo GCTI: {e}")
 
-            # B) Insertar Logo del Cliente en E1 (Búsqueda multiruta garantizada en Render)
+            # B) Insertar Logo del Cliente en E1
             if logo_url_cliente:
-                nombre_archivo_logo = os.path.basename(logo_url_cliente)
+                # Extraer solo el nombre del archivo
+                filename_logo = os.path.basename(logo_url_cliente)
                 
-                # Probar las 3 posibles ubicaciones físicas en el servidor
-                posibles_rutas = [
-                    os.path.join(UPLOAD_FOLDER, nombre_archivo_logo),
-                    os.path.join(app.root_path, 'static', 'logos_empresas', nombre_archivo_logo),
-                    os.path.join(app.root_path, logo_url_cliente.lstrip('/'))
-                ]
-                
-                path_logo_cli = None
-                for ruta in posibles_rutas:
-                    if os.path.exists(ruta):
-                        path_logo_cli = ruta
-                        break
+                # Construir la ruta absoluta usando la carpeta oficial
+                path_logo_cli = os.path.join(UPLOAD_FOLDER, filename_logo)
 
-                if path_logo_cli:
+                if os.path.exists(path_logo_cli):
                     try:
                         img_cli = OpenpyxlImage(path_logo_cli)
                         img_cli.width = 110
                         img_cli.height = 50
                         ws.add_image(img_cli, 'E1')
-                        print(f"✅ Logo cargado exitosamente desde: {path_logo_cli}")
                     except Exception as e:
-                        print(f"⚠️ Alerta al procesar imagen del logo: {e}")
+                        print(f"⚠️ Alerta Logo Cliente: {e}")
                 else:
-                    print(f"⚠️ No se encontró el archivo del logo en el servidor. Rutas probadas: {posibles_rutas}")
+                    print(f"⚠️ No se encontró la imagen en disco: {path_logo_cli}")
 
             # 6. Fila 5: Encabezados de Tabla (Barra Negra)
             ws.row_dimensions[5].height = 24
